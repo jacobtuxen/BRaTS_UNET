@@ -10,12 +10,12 @@ from torch import optim
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from torch.utils.data import ConcatDataset
-
 from data_loader import something
 from datetime import datetime
 from evaluate import evaluate
 from unet_model.unet_model import UNet
 from utils.dice_score import dice_loss
+import time
 
 def train_model(
         model,
@@ -49,10 +49,12 @@ def train_model(
     # 5. Begin training
     all_epoch_losses = []
     all_accuracy = []
+    total_training_time = 0
     for epoch in range(1, epochs + 1):
         model.train()
         epoch_loss = 0
         for batch in train_loader:
+              start_time = time.time()  # start timing
               images, true_masks = batch[0], batch[1]
               
 
@@ -90,6 +92,8 @@ def train_model(
               global_step += 1
               epoch_loss += loss.item()
               all_epoch_losses.append(epoch_loss)
+              epoch_training_time = time.time() - start_time  # end timing
+              total_training_time += epoch_training_time
 
     val_score = evaluate(model, val_loader, device, amp)
     all_accuracy.append(val_score.item())
@@ -103,10 +107,16 @@ def train_model(
     
     np.save(f'epoch_losses_{name_indentifier}.npy', all_epoch_losses)
     np.save(f'validation_losses_{name_indentifier}.npy', all_accuracy)
+    training_time_str = f'Total training time: {total_training_time:.4f} seconds\n'
+    hyperparameters_str = f'Hyperparameters:\nEpochs: {epochs}\nBatch size: {batch_size}\nLearning rate: {learning_rate}\nWeight decay: {weight_decay}\nMomentum: {momentum}\nGradient clipping: {gradient_clipping}\n'
+    with open(info_file, 'w') as f:
+        f.write(training_time_str)
+        f.write(hyperparameters_str)
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 name_indentifier = f'UNet_BRaTS{timestamp}_'
 dir_checkpoint = Path(f'./cp_{name_indentifier}/')
+info_file = f'info_{name_indentifier}.txt'
 
 model = UNet(n_channels=1, n_classes=3, bilinear=True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
