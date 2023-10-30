@@ -16,6 +16,8 @@ from datetime import datetime
 from evaluate import evaluate
 from unet_model.unet_model import UNet
 from utils.dice_score import dice_loss
+import wandb
+
 
 def train_model(
         model,
