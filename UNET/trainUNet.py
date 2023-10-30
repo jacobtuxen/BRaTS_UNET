@@ -10,12 +10,16 @@ from torch import optim
 from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from torch.utils.data import ConcatDataset
-from data_loader import something
 from datetime import datetime
 from evaluate import evaluate
 from unet_model.unet_model import UNet
 from utils.dice_score import dice_loss
 import time
+import wandb
+WANDB_API_KEY="95ae248f43f0ffe6b0a851c14fcfa01bc07a6fb4"
+
+
+wandb.login(key=WANDB_API_KEY)
 
 def train_model(
         model,
@@ -29,9 +33,21 @@ def train_model(
         momentum: float = 0.999,
         gradient_clipping: float = 1.0,
 ):
+    # 0. Set up loggin for wandb
+    #setup wandb
+    wandb.init(
+        project=f"UNET_{timestamp}",
+        config={
+            "epochs": {epochs},
+            "batch_size": {batch_size},
+            "learning_rate": {learning_rate},
+        }
+    )
+    
+
     # 1. Create dataset
-    train_set = dataset
-    val_set = dataset_val
+    train_set = dataset = 0
+    val_set = dataset_val = 0
     
     # 3. Create data loaders set numworkers=os.cpu_count() for faster data loading
     loader_args = dict(batch_size=batch_size, num_workers=4, pin_memory=True)
@@ -50,6 +66,7 @@ def train_model(
     all_epoch_losses = []
     all_accuracy = []
     total_training_time = 0
+    wandb.watch(model, log="all")
     for epoch in range(1, epochs + 1):
         model.train()
         epoch_loss = 0
@@ -92,6 +109,18 @@ def train_model(
               global_step += 1
               epoch_loss += loss.item()
               all_epoch_losses.append(epoch_loss)
+
+              #LOG WANDB
+              wandb.log({"train/train_loss": epoch_loss,
+                        "train/learning_rate": optimizer.param_groups[0]['lr'],
+                        "train/epoch": epoch,
+                        "train/step": global_step,
+                        "train/epoch_training_time": epoch_training_time,
+                        "train/total_training_time": total_training_time,
+                        "train/batch_size": batch_size,
+                        "train/weight_decay": weight_decay,
+                        })
+
               epoch_training_time = time.time() - start_time  # end timing
               total_training_time += epoch_training_time
 
@@ -122,3 +151,5 @@ model = UNet(n_channels=1, n_classes=3, bilinear=True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device=device)
 train_model(model, device=device, epochs=100, batch_size=32, learning_rate=1e-5, save_checkpoint=True, amp=False, weight_decay=1e-8, momentum=0.9, gradient_clipping=1.0)
+
+
