@@ -12,13 +12,13 @@ from tqdm import tqdm
 from torch.utils.data import ConcatDataset
 from datetime import datetime
 from evaluate import evaluate
-from unet_model.unet_model import UNet3D
+from unet_model.unet_model import UNet
 from utils.dice_score import dice_loss
+from .predictions import plot_predictions
 import time
 import wandb
-WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
-
-wandb.login(key=WANDB_API_KEY)
+WANDB_API_KEY=""
+USE_WANDB = False
 
 def train_model(
         model,
@@ -26,22 +26,29 @@ def train_model(
         epochs: int = 5,
         batch_size: int = 1,
         learning_rate: float = 1e-5,
-        save_checkpoint: bool = True,
         amp: bool = False,
         weight_decay: float = 1e-8,
         momentum: float = 0.999,
         gradient_clipping: float = 1.0,
+        optimizer: str = "RMSprop",
+        wandb_active = False,
 ):
     # 0. Set up loggin for wandb
     #setup wandb
-    wandb.init(
-        project=f"UNET3D_{timestamp}",
-        config={
-            "epochs": {epochs},
-            "batch_size": {batch_size},
-            "learning_rate": {learning_rate},
-        }
-    )
+    if wandb_active:
+        wandb.init(
+            project=f"UNE3D_{timestamp}",
+            config={
+                "epochs": {epochs},
+                "batch_size": {batch_size},
+                "learning_rate": {learning_rate},
+                "optimizer": {optimizer},
+                "amp": {amp},
+                "weight_decay": {weight_decay},
+                "momentum": {momentum},
+                "gradient_clipping": {gradient_clipping}
+            }
+        )
     
 
     # 1. Create dataset
@@ -54,8 +61,15 @@ def train_model(
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
 
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
-    optimizer = optim.RMSprop(model.parameters(),
-                              lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
+    match optimizer:
+        case "Adam":
+            optimizer = optim.Adam(model.parameters(),
+                                    lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.999))
+        case "RMSprop":
+            optimizer = optim.RMSprop(model.parameters(),lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
+        case "SGD":
+            optimizer = optim.SGD(model.parameters(),lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
+
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
     criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
@@ -65,7 +79,6 @@ def train_model(
     all_epoch_losses = []
     all_accuracy = []
     total_training_time = 0
-    wandb.watch(model, log="all")
     for epoch in range(1, epochs + 1):
         model.train()
         epoch_loss = 0
@@ -95,7 +108,7 @@ def train_model(
                       loss = criterion(masks_pred, true_masks)
                       loss += dice_loss(
                           F.softmax(masks_pred, dim=1).float(),
-                          F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(),
+                          F.one_hot(true_masks, model.n_classes).permute(0, 3, 1, 2).float(),
                           multiclass=True
                       )
 
@@ -110,45 +123,68 @@ def train_model(
               all_epoch_losses.append(epoch_loss)
 
               #LOG WANDB
-              wandb.log({"train/train_loss": epoch_loss,
-                        "train/learning_rate": optimizer.param_groups[0]['lr'],
-                        "train/epoch": epoch,
-                        "train/step": global_step,
-                        "train/epoch_training_time": epoch_training_time,
-                        "train/total_training_time": total_training_time,
-                        "train/batch_size": batch_size,
-                        "train/weight_decay": weight_decay,
-                        })
+              if wandb_active:
+                wandb.log({"train/train_loss": epoch_loss,
+                            "train/learning_rate": optimizer.param_groups[0]['lr'],
+                            "train/epoch": epoch,
+                            "train/step": global_step,
+                            "train/epoch_training_time": epoch_training_time,
+                            "train/total_training_time": total_training_time,
+                            "train/accuracy": val_score.item()
+                            })
 
               epoch_training_time = time.time() - start_time  # end timing
               total_training_time += epoch_training_time
 
     val_score = evaluate(model, val_loader, device, amp)
     all_accuracy.append(val_score.item())
+    fig = plot_predictions(model, device, images, true_masks)
+    if wandb_active:
+        wandb.log({"val/val_accuracy": val_score.item(),
+        })
     scheduler.step(val_score)
-    if epoch%10 == 0:
-            if save_checkpoint:
-                Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
-                state_dict = model.state_dict()
-                torch.save(state_dict, str(dir_checkpoint / f'{name_indentifier}.pth'.format(epoch)))
-                logging.info(f'Checkpoint {epoch} saved!')
-    
-    np.save(f'epoch_losses_{name_indentifier}.npy', all_epoch_losses)
-    np.save(f'validation_losses_{name_indentifier}.npy', all_accuracy)
-    training_time_str = f'Total training time: {total_training_time:.4f} seconds\n'
-    hyperparameters_str = f'Hyperparameters:\nEpochs: {epochs}\nBatch size: {batch_size}\nLearning rate: {learning_rate}\nWeight decay: {weight_decay}\nMomentum: {momentum}\nGradient clipping: {gradient_clipping}\n'
-    with open(info_file, 'w') as f:
-        f.write(training_time_str)
-        f.write(hyperparameters_str)
 
 timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 name_indentifier = f'UNet_BRaTS{timestamp}_'
 dir_checkpoint = Path(f'./cp_{name_indentifier}/')
 info_file = f'info_{name_indentifier}.txt'
 
-model = UNet3D(n_channels=1, n_classes=3, bilinear=True)
+#LOGIN
+if USE_WANDB:
+    wandb.login(key=WANDB_API_KEY)
+    sweep_configuration = {
+        "method": "random",
+        "name": "sweep",
+        "metric": {"goal": "maximize", "name": "val/val_accuracy"},
+        "parameters": {
+            "batch_size": {"values": [16, 32, 64, 128]},
+            "lr": {"max": 1e-3, "min": 1e-6},
+            "epochs": {"values": [30,60,100]},
+            "weight_decay": {"max": 1e-3, "min": 1e-6},
+            "momentum": {"values": [0.9, 0.99]},
+            "amp": {"values": [True, False]},
+            "gradient_clipping": {"values": [0.1, 0.5, 1.0]},
+            "optimzer": {"values": ["Adam", "RMSprop", "SGD"]},
+        }
+    }
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
+model = UNet(n_channels=1, n_classes=3, bilinear=True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device=device)
-train_model(model, device=device, epochs=100, batch_size=32, learning_rate=1e-5, save_checkpoint=True, amp=False, weight_decay=1e-8, momentum=0.9, gradient_clipping=1.0)
-
+if USE_WANDB:
+    train_model(model=model, 
+                device=device, 
+                epochs=wandb.config.epochs, 
+                batch_size=wandb.config.batch_size, 
+                learning_rate=wandb.config.lr,
+                amp=wandb.config.amp,
+                weight_decay=wandb.config.weight_decay, 
+                momentum=wandb.config.momentum, 
+                gradient_clipping=wandb.config.gradient_clipping,
+                optimizer=wandb.config.optimizer,
+                wandb_active=True
+                )
+    wandb.agent(sweep_id, function=train_model, count=4)
+else:
+    train_model(model=model)
 
