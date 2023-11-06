@@ -16,7 +16,7 @@ from unet_model.unet_model import UNet3D
 from utils.dice_score import dice_loss
 import time
 import wandb
-WANDB_API_KEY=""
+WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
 
 wandb.login(key=WANDB_API_KEY)
 
