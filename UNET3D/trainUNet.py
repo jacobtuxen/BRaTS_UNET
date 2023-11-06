@@ -58,9 +58,9 @@ def train_model(
         )
     
 
-    # 1. Create dataset
-    patient_ids = ['BraTS2021_00495','BraTS2021_00495','BraTS2021_00495','BraTS2021_00495','BraTS2021_00495','BraTS2021_00495']
-    data_dir = git_dir / 'data' / 'archive' / 'BraTS2021_00495'
+    # 1. Create dataset #Note this is for testing
+    patient_ids = ['BraTS2021_00380']
+    data_dir = Path.home() /'02456_Deep_Learning' / 'data'
     dataset = BrainDataset(patient_ids=patient_ids, data_dir=data_dir)
     train_set = dataset
     dataset_val = BrainDataset(patient_ids=patient_ids, data_dir=data_dir)
@@ -91,6 +91,7 @@ def train_model(
     all_accuracy = []
     total_training_time = 0
     for epoch in range(1, epochs + 1):
+        print('epoch started')
         model.train()
         epoch_loss = 0
         for batch in train_loader:
@@ -103,7 +104,7 @@ def train_model(
                   f'but loaded images have {images.shape[1]} channels. Please check that ' \
                   'the images are loaded correctly.'
 
-              images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
+              images = images.to(device=device, dtype=torch.float32)
               true_masks = true_masks.to(device=device, dtype=torch.long)
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
@@ -179,7 +180,7 @@ if USE_WANDB:
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
-model = UNet3D(n_channels=1, n_classes=3, bilinear=True)
+model = UNet3D(n_channels=4, n_classes=3, bilinear=True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device=device)
 if USE_WANDB:
@@ -198,4 +199,4 @@ if USE_WANDB:
     wandb.agent(sweep_id, function=train_model, count=4)
 else:
     train_model(model=model, device=device)
-
+    print("Training done!")

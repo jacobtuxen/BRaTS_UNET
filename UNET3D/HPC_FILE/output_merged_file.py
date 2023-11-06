@@ -1,4 +1,4 @@
-# Content from: UNET/unet_model/unet_parts.py
+# Content from: UNET3D/unet_model/unet_parts.py
 """ Parts of the U-Net model """
 
 import torch
@@ -14,11 +14,11 @@ class DoubleConv(nn.Module):
         if not mid_channels:
             mid_channels = out_channels
         self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(mid_channels),
+            nn.Conv3d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm3d(mid_channels),
             nn.ReLU(inplace=True),
-            nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(out_channels),
+            nn.Conv3d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.BatchNorm3d(out_channels),
             nn.ReLU(inplace=True)
         )
 
@@ -32,7 +32,7 @@ class Down(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.maxpool_conv = nn.Sequential(
-            nn.MaxPool2d(2),
+            nn.MaxPool3d(2),
             DoubleConv(in_channels, out_channels)
         )
 
@@ -48,10 +48,10 @@ class Up(nn.Module):
 
         # if bilinear, use the normal convolutions to reduce the number of channels
         if bilinear:
-            self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+            self.up = nn.Upsample(scale_factor=2, mode='trilinear', align_corners=True)
             self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
         else:
-            self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+            self.up = nn.ConvTranspose3d(in_channels , in_channels // 2, kernel_size=2, stride=2)
             self.conv = DoubleConv(in_channels, out_channels)
 
     def forward(self, x1, x2):
@@ -59,9 +59,11 @@ class Up(nn.Module):
         # input is CHW
         diffY = x2.size()[2] - x1.size()[2]
         diffX = x2.size()[3] - x1.size()[3]
+        diffZ = x2.size()[4] - x1.size()[4]
 
         x1 = F.pad(x1, [diffX // 2, diffX - diffX // 2,
-                        diffY // 2, diffY - diffY // 2])
+                        diffY // 2, diffY - diffY // 2,
+                        diffZ // 2, diffZ - diffZ // 2])
         # if you have padding issues, see
         # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
         # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
@@ -72,19 +74,19 @@ class Up(nn.Module):
 class OutConv(nn.Module):
     def __init__(self, in_channels, out_channels):
         super(OutConv, self).__init__()
-        self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+        self.conv = nn.Conv3d(in_channels, out_channels, kernel_size=1)
 
     def forward(self, x):
         return self.conv(x)
 
-# Content from: UNET/unet_model/unet_model.py
+# Content from: UNET3D/unet_model/unet_model.py
 """ Full assembly of the parts to form the complete network """
 
 
 
-class UNet(nn.Module):
+class UNet3D(nn.Module):
     def __init__(self, n_channels, n_classes, bilinear=False):
-        super(UNet, self).__init__()
+        super(UNet3D, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.bilinear = bilinear
@@ -126,7 +128,7 @@ class UNet(nn.Module):
         self.up4 = torch.utils.checkpoint(self.up4)
         self.outc = torch.utils.checkpoint(self.outc)
 
-# Content from: UNET/utils/dice_score.py
+# Content from: UNET3D/utils/dice_score.py
 import torch
 from torch import Tensor
 
@@ -134,7 +136,7 @@ from torch import Tensor
 def dice_coeff(input: Tensor, target: Tensor, reduce_batch_first: bool = False, epsilon: float = 1e-6):
     # Average of Dice coefficient for all batches, or for a single mask
     assert input.size() == target.size()
-    assert input.dim() == 3 or not reduce_batch_first
+    assert input.dim() >= 3 or not reduce_batch_first
 
     sum_dim = (-1, -2) if input.dim() == 2 or not reduce_batch_first else (-1, -2, -3)
 
@@ -156,7 +158,7 @@ def dice_loss(input: Tensor, target: Tensor, multiclass: bool = False):
     fn = multiclass_dice_coeff if multiclass else dice_coeff
     return 1 - fn(input, target, reduce_batch_first=True)
 
-# Content from: UNET/data_loader.py
+# Content from: UNET3D/data_loader.py
 import torch
 from torch.utils.data import Dataset
 import nibabel as nib
@@ -164,8 +166,8 @@ import numpy as np
 from pathlib import Path
 
 class BrainDataset(Dataset):
-    def __init__(self, filenames: list, data_dir: Path):
-        self.filenames = filenames
+    def __init__(self, patient_ids: list, data_dir: Path):
+        self.patient_ids = patient_ids
         self.data_dir = data_dir
         self.data = []
 
@@ -173,14 +175,13 @@ class BrainDataset(Dataset):
 
     def init_data(self):
         ids = ['flair.nii.gz','t1.nii.gz', 't1ce.nii.gz', 't2.nii.gz','seg.nii.gz']
-        for id in ids:
-            self.data.append([nib.load(self.data_dir / filename / f'{filename}_{id}').get_fdata() for filename in self.filenames])
-
+        for patient_id in self.patient_ids:
+            self.data.append([nib.load(self.data_dir / patient_id / f'{patient_id}_{id}').get_fdata() for id in ids])
     def __len__(self):
-        return len(self.data[0][0,0,:])
+        return len(self.data)
 
     def __getitem__(self, idx):
-        t1, t1c ,t2, flair, target = [self.data[i][:,:,idx] for i in range(5)]
+        flair, t1, t1c ,t2, target = self.data[idx]
         t1 = torch.from_numpy(t1).float()
         t1c = torch.from_numpy(t1c).float()
         t2 = torch.from_numpy(t2).float()
@@ -192,10 +193,20 @@ class BrainDataset(Dataset):
         t1c = (t1c - t1c.mean()) / t1c.std()+1e-8
         t2 = (t2 - t2.mean()) / t2.std()+1e-8
         flair = (flair - flair.mean()) / flair.std()+1e-8
-        return t1, t1c ,t2, flair, target
+
+        t1 = t1.unsqueeze(0)
+        t1c = t1c.unsqueeze(0)
+        t2 = t2.unsqueeze(0)
+        flair = flair.unsqueeze(0)
+        target = target.unsqueeze(0)
+
+        #Input data size [B,C,W,D,H] 
+        #Concatenate t1,t1c,t2,flair
+        x = torch.concatenate((t1,t1c,t2,flair), dim=0)
+        return x, target
 
 
-# Content from: UNET/evaluate.py
+# Content from: UNET3D/evaluate.py
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -230,16 +241,55 @@ def evaluate(net, dataloader, device, amp):
             else:
                 assert mask_true.min() >= 0 and mask_true.max() < net.n_classes, 'True mask indices should be in [0, n_classes['
                 # convert to one-hot format
-                mask_true = F.one_hot(mask_true, net.n_classes).permute(0, 3, 1, 2).float()
-                mask_pred = F.one_hot(mask_pred.argmax(dim=1), net.n_classes).permute(0, 3, 1, 2).float()
+                mask_true = F.one_hot(mask_true, net.n_classes).permute(0, 4, 1, 2, 3).float()
+                mask_pred = F.one_hot(mask_pred.argmax(dim=1), net.n_classes).permute(0, 4, 1, 2, 3).float()
                 # compute the Dice score, ignoring background
                 dice_score += multiclass_dice_coeff(mask_pred[:, 1:], mask_true[:, 1:], reduce_batch_first=False)
 
     net.train()
     return dice_score / max(num_val_batches, 1)
 
-# Content from: UNET/trainUNet.py
+# Content from: UNET3D/predictions.py
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import torch
+
+
+def plot_predictions(model, device, input, target):
+    #input is (b,c,w,h,d)
+    with torch.no_grad:
+        pred = model(input)
+    pred = pred.numpy()
+    target = target.numpy()
+    input = input.numpy()
+
+    fig = plt.figure()
+    plot_titles = ['t1', 't1c', 't2', 'flair', 'gt', 'pred']
+    n_slices = 5
+    slices = np.linspace(20,140, n_slices)
+    for idx_i, slice in enumerate(slices):
+        for idx_j, title in enumerate(plot_titles):
+            plt.subplot(n_slices*len(plot_titles), idx_j % len(plot_titles + idx_i * len(plot_titles + 1)))
+            if idx_j <= 3:
+                plt.imshow(input[0,idx_j,:,:,slice])
+            if idx_j == 4:
+                plt.imshow(target[0,idx_j,:,:,slice])
+            else:
+                plt.imshow(pred[0,idx_j,:,:,slice])
+            if idx_i == 0:
+                plt.title(title)
+    return fig
+
+
+
+# Content from: UNET3D/trainUNet.py
+
 import logging
+from pathlib import Path
+import sys
+git_dir = Path.home() / 'Documents' / 'DTU' / 'E23' / '02456_Deep_Learning' / 'Brain_Project' / 'BRaTS_UNET'
+sys.path.append(str(git_dir))
 import os
 import torch
 import torch.nn as nn
@@ -254,6 +304,7 @@ from torch.utils.data import ConcatDataset
 from datetime import datetime
 import time
 import wandb
+
 WANDB_API_KEY=""
 USE_WANDB = False
 
@@ -288,9 +339,13 @@ def train_model(
         )
     
 
-    # 1. Create dataset
-    train_set = dataset = 0
-    val_set = dataset_val = 0
+    # 1. Create dataset #Note this is for testing
+    patient_ids = ['BraTS2021_00380']
+    data_dir = Path.home() /'02456_Deep_Learning' / 'data'
+    dataset = BrainDataset(patient_ids=patient_ids, data_dir=data_dir)
+    train_set = dataset
+    dataset_val = BrainDataset(patient_ids=patient_ids, data_dir=data_dir)
+    val_set = dataset_val
     
     # 3. Create data loaders set numworkers=os.cpu_count() for faster data loading
     loader_args = dict(batch_size=batch_size, num_workers=4, pin_memory=True)
@@ -317,6 +372,7 @@ def train_model(
     all_accuracy = []
     total_training_time = 0
     for epoch in range(1, epochs + 1):
+        print('epoch started')
         model.train()
         epoch_loss = 0
         for batch in train_loader:
@@ -329,7 +385,7 @@ def train_model(
                   f'but loaded images have {images.shape[1]} channels. Please check that ' \
                   'the images are loaded correctly.'
 
-              images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
+              images = images.to(device=device, dtype=torch.float32)
               true_masks = true_masks.to(device=device, dtype=torch.long)
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
@@ -375,8 +431,8 @@ def train_model(
 
     val_score = evaluate(model, val_loader, device, amp)
     all_accuracy.append(val_score.item())
-    #plot = make_plot(model, val_loader)
     if wandb_active:
+        fig = plot_predictions(model, device, images, true_masks)
         wandb.log({"val/val_accuracy": val_score.item(),
         })
     scheduler.step(val_score)
@@ -392,7 +448,7 @@ if USE_WANDB:
     sweep_configuration = {
         "method": "random",
         "name": "sweep",
-        "metric": {"goal": "maximize", "name": "val_acc"},
+        "metric": {"goal": "maximize", "name": "val/val_accuracy"},
         "parameters": {
             "batch_size": {"values": [16, 32, 64, 128]},
             "lr": {"max": 1e-3, "min": 1e-6},
@@ -405,7 +461,7 @@ if USE_WANDB:
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
-model = UNet(n_channels=1, n_classes=3, bilinear=True)
+model = UNet3D(n_channels=4, n_classes=3, bilinear=True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device=device)
 if USE_WANDB:
@@ -423,7 +479,6 @@ if USE_WANDB:
                 )
     wandb.agent(sweep_id, function=train_model, count=4)
 else:
-    train_model(model=model)
-
-
+    train_model(model=model, device=device)
+    print("Training done!")
 

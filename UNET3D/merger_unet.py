@@ -1,19 +1,19 @@
 import os
 
 # List of source directories
-source_dirs = ["UNET/unet_model/", "UNET/utils/", "UNET/"]
-output_file_path = "UNET/HPC_FILE/output_merged_file.py"
+source_dirs = ["UNET3D/unet_model/", "UNET3D/utils/", "UNET3D/"]
+output_file_path = "UNET3D/HPC_FILE/output_merged_file.py"
 
 # Specify the files to be read first
 first_files = [
-    "UNET/unet_model/unet_parts.py",
-    "UNET/unet_model/unet_model.py",
-    "UNET/utils/dice_score.py",
+    "UNET3D/unet_model/unet_parts.py",
+    "UNET3D/unet_model/unet_model.py",
+    "UNET3D/utils/dice_score.py",
 ]
 
 # Specify files to be excluded
 excluded_files = [
-    "UNET/merger_unet.py",
+    "UNET3D/merger_unet.py",
     # "UNET/test.py",
 ]
 
@@ -39,7 +39,9 @@ ignored_imports = [
     "from data_loader import", #<-- REWRITE THIS TO MATCH DATA LOADER
     "from unet_model.unet_model import UNet",
     "from evaluate import evaluate",
-    "from utils.dice_score import dice_loss"
+    "from utils.dice_score import dice_loss",
+    "from predictions import plot_predictions",
+    "from UNET3D.data_loader import BrainDataset"
 ]
 
 with open(output_file_path, 'w', encoding='utf-8') as output_file:

@@ -16,7 +16,6 @@ class BrainDataset(Dataset):
         ids = ['flair.nii.gz','t1.nii.gz', 't1ce.nii.gz', 't2.nii.gz','seg.nii.gz']
         for patient_id in self.patient_ids:
             self.data.append([nib.load(self.data_dir / patient_id / f'{patient_id}_{id}').get_fdata() for id in ids])
-        print(f'len of data: {len(self.data)}')
     def __len__(self):
         return len(self.data)
 
