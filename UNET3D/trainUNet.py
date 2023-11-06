@@ -1,4 +1,9 @@
+
 import logging
+from pathlib import Path
+import sys
+git_dir = Path.home() / 'Documents' / 'DTU' / 'E23' / '02456_Deep_Learning' / 'Brain_Project' / 'BRaTS_UNET'
+sys.path.append(str(git_dir))
 import os
 import torch
 import torch.nn as nn
@@ -12,11 +17,13 @@ from tqdm import tqdm
 from torch.utils.data import ConcatDataset
 from datetime import datetime
 from evaluate import evaluate
-from unet_model.unet_model import UNet
+from unet_model.unet_model import UNet3D
 from utils.dice_score import dice_loss
-from .predictions import plot_predictions
+from predictions import plot_predictions
+from UNET3D.data_loader import BrainDataset
 import time
 import wandb
+
 WANDB_API_KEY=""
 USE_WANDB = False
 
@@ -52,8 +59,12 @@ def train_model(
     
 
     # 1. Create dataset
-    train_set = dataset = 0
-    val_set = dataset_val = 0
+    patient_ids = ['BraTS2021_00495','BraTS2021_00495','BraTS2021_00495','BraTS2021_00495','BraTS2021_00495','BraTS2021_00495']
+    data_dir = git_dir / 'data' / 'archive' / 'BraTS2021_00495'
+    dataset = BrainDataset(patient_ids=patient_ids, data_dir=data_dir)
+    train_set = dataset
+    dataset_val = BrainDataset(patient_ids=patient_ids, data_dir=data_dir)
+    val_set = dataset_val
     
     # 3. Create data loaders set numworkers=os.cpu_count() for faster data loading
     loader_args = dict(batch_size=batch_size, num_workers=4, pin_memory=True)
@@ -138,8 +149,8 @@ def train_model(
 
     val_score = evaluate(model, val_loader, device, amp)
     all_accuracy.append(val_score.item())
-    fig = plot_predictions(model, device, images, true_masks)
     if wandb_active:
+        fig = plot_predictions(model, device, images, true_masks)
         wandb.log({"val/val_accuracy": val_score.item(),
         })
     scheduler.step(val_score)
@@ -168,7 +179,7 @@ if USE_WANDB:
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
-model = UNet(n_channels=1, n_classes=3, bilinear=True)
+model = UNet3D(n_channels=1, n_classes=3, bilinear=True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device=device)
 if USE_WANDB:
@@ -186,5 +197,5 @@ if USE_WANDB:
                 )
     wandb.agent(sweep_id, function=train_model, count=4)
 else:
-    train_model(model=model)
+    train_model(model=model, device=device)
 
