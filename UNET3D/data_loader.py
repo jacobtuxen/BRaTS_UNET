@@ -21,11 +21,11 @@ class BrainDataset(Dataset):
 
     def __getitem__(self, idx):
         flair, t1, t1c ,t2, target = self.data[idx]
-        t1 = torch.from_numpy(t1).float()
-        t1c = torch.from_numpy(t1c).float()
-        t2 = torch.from_numpy(t2).float()
-        flair = torch.from_numpy(flair).float()
-        target = torch.from_numpy(target).float()
+        t1 = torch.from_numpy(t1).float16()
+        t1c = torch.from_numpy(t1c).float16()
+        t2 = torch.from_numpy(t2).float16()
+        flair = torch.from_numpy(flair).float16()
+        target = torch.from_numpy(target).float16()
 
         #Normalize
         t1 = (t1 - t1.mean()) / t1.std()+1e-8

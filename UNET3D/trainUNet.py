@@ -104,7 +104,7 @@ def train_model(
                   f'but loaded images have {images.shape[1]} channels. Please check that ' \
                   'the images are loaded correctly.'
 
-              images = images.to(device=device, dtype=torch.float32)
+              images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
               true_masks = true_masks.to(device=device, dtype=torch.long)
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
