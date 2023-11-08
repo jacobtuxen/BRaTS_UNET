@@ -59,15 +59,18 @@ def train_model(
     
 
     # 1. Create dataset #Note this is for testing
-    patient_ids = ['BraTS2021_00380']
-    data_dir = Path.home() /'02456_Deep_Learning' / 'data'
-    dataset = BrainDataset(patient_ids=patient_ids, data_dir=data_dir)
-    train_set = dataset
-    dataset_val = BrainDataset(patient_ids=patient_ids, data_dir=data_dir)
-    val_set = dataset_val
-    
-    # 3. Create data loaders set numworkers=os.cpu_count() for faster data loading
-    loader_args = dict(batch_size=batch_size, num_workers=4, pin_memory=True)
+    data_dir = Path('/work3/s211469/data')
+    patient_ids = np.loadtxt(data_dir / 'filenames.txt', dtype=str)
+    val_pct = 0.1
+    val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
+    training_ids = [id for id in patient_ids if id not in val_ids]
+
+    # 1. Create dataset and validation set
+    train_set = BrainDataset(patient_ids=training_ids, data_dir=data_dir)
+    val_set = BrainDataset(patient_ids=val_ids, data_dir=data_dir)
+
+    # 3. Create data loaders set numworkers=4 as requested on HPC for faster data loading
+    loader_args = dict(batch_size=batch_size, num_workers=4)
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
 
@@ -92,19 +95,23 @@ def train_model(
     total_training_time = 0
     for epoch in range(1, epochs + 1):
         print('epoch started')
+        if device.type == 'cuda':
+            print(f'Current memory allocated: {torch.cuda.memory_allocated(device)/1024**3:.2f} GB')
+            print(f'Max memory allocated: {torch.cuda.max_memory_allocated(device)/1024**3:.2f} GB')
+            print(f'Current memory cached: {torch.cuda.memory_reserved(device)/1024**3:.2f} GB')
+            print(f'Max memory cached: {torch.cuda.max_memory_reserved(device)/1024**3:.2f} GB')
         model.train()
         epoch_loss = 0
         for batch in train_loader:
               start_time = time.time()  # start timing
               images, true_masks = batch[0], batch[1]
-              
 
               assert images.shape[1] == model.n_channels, \
                   f'Network has been defined with {model.n_channels} input channels, ' \
                   f'but loaded images have {images.shape[1]} channels. Please check that ' \
                   'the images are loaded correctly.'
 
-              images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
+              images = images.to(device=device, dtype=torch.float32)
               true_masks = true_masks.to(device=device, dtype=torch.long)
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
@@ -150,33 +157,25 @@ def train_model(
 
     val_score = evaluate(model, val_loader, device, amp)
     all_accuracy.append(val_score.item())
-    if wandb_active:
-        fig = plot_predictions(model, device, images, true_masks)
-        wandb.log({"val/val_accuracy": val_score.item(),
-        })
     scheduler.step(val_score)
-
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-name_indentifier = f'UNet_BRaTS{timestamp}_'
-dir_checkpoint = Path(f'./cp_{name_indentifier}/')
-info_file = f'info_{name_indentifier}.txt'
 
 #LOGIN
 if USE_WANDB:
+    timestamp = datetime.now().strftime("%Y%d%m-%H%M%S")
     wandb.login(key=WANDB_API_KEY)
     sweep_configuration = {
         "method": "random",
         "name": "sweep",
         "metric": {"goal": "maximize", "name": "val/val_accuracy"},
         "parameters": {
-            "batch_size": {"values": [16, 32, 64, 128]},
+            "batch_size": {"values": [1,2,4]},
             "lr": {"max": 1e-3, "min": 1e-6},
             "epochs": {"values": [30,60,100]},
             "weight_decay": {"max": 1e-3, "min": 1e-6},
             "momentum": {"values": [0.9, 0.99]},
             "amp": {"values": [True, False]},
             "gradient_clipping": {"values": [0.1, 0.5, 1.0]},
-            "optimzer": {"values": ["Adam", "RMSprop", "SGD"]},
+            "optimzer": {"values": ["RMSprop"]},
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
@@ -196,7 +195,7 @@ if USE_WANDB:
                 optimizer=wandb.config.optimizer,
                 wandb_active=True
                 )
-    wandb.agent(sweep_id, function=train_model, count=4)
+    wandb.agent(sweep_id, function=train_model, count=20)
 else:
     train_model(model=model, device=device)
     print("Training done!")
