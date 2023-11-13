@@ -14,11 +14,11 @@ class BrainDataset(Dataset):
         return nib.load(file_path).get_fdata()
 
     def __len__(self):
-        return len(self.data)
+        return len(self.patient_ids)
     
     def __getitem__(self, idx):
         patient_id = self.patient_ids[idx]
-        data_paths = [self.data_dir / patient_id / f'{patient_id}_{data_id}' for data_id in ['flair.nii.gz','t1.nii.gz', 't1ce.nii.gz', 't2.nii.gz','seg.nii.gz']]
+        data_paths = [self.data_dir / patient_id / f'{patient_id}_{data_id}' for data_id in ['flair.nii','t1.nii', 't1ce.nii', 't2.nii','seg.nii']]
         data = [self.load_nifti_file(path) for path in data_paths]
         target = torch.from_numpy(np.where(data[4]==4, 3, data[4])).long()
         #Cat
@@ -37,9 +37,9 @@ class BrainDataset(Dataset):
         return data, target, patient_id
 
 #Test loader    
-patient_ids = ['BraTS2021_00495']
-data_dir = Path.home() / 'Documents' / 'DTU' / 'E23' / '02456_Deep_Learning' / 'Brain_Project' / 'BRaTS_UNET' / 'data' / 'archive'
-dataset = BrainDataset(patient_ids, data_dir)
-data, target = dataset[0]
-print(data.shape)
-print(target.shape)
+# patient_ids = ['BraTS2021_00495']
+# data_dir = Path.home() / 'Documents' / 'DTU' / 'E23' / '02456_Deep_Learning' / 'Brain_Project' / 'BRaTS_UNET' / 'data' / 'archive'
+# dataset = BrainDataset(patient_ids, data_dir)
+# data, target = dataset[0]
+# print(data.shape)
+# print(target.shape)
