@@ -9,6 +9,10 @@ UNET for BRaTS dataset.
 - [X] extend model to 3d (make new one) -> Jacob
 - [X] Create data loader for 3d -> Christian
 - [X] Add wandb team, add everyone and setup sweeper ->
+- [ ] Investigate distribution of labels --> Christian
+- [ ] Data augementation (rotation, noise, sampling) --> Mads
+- [ ] Gemme trænings plot lokalt --> Jacob
+- [ ] HPC, og debugging -> Jacob
 - [ ] Define output of model, (structurize)
 - [ ] Setup HPC and push data
 - [ ] [RESEARCH] Investigate feature maps
