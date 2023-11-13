@@ -22,6 +22,14 @@ class BrainDataset(Dataset):
         target = torch.from_numpy(np.where(data[4]==4, 3, data[4])).long()
         #Cat
         data = torch.cat([torch.from_numpy(data[i]).unsqueeze(0) for i in range(4)], dim=0)
+
+        start_idx = (data.shape[1]-160)//2
+        end_idx = (data.shape[1]+160)//2
+        
+        data = data[:,start_idx:end_idx,start_idx:end_idx,:]
+        target = target[start_idx:end_idx,start_idx:end_idx,:]
+        
+
         return data, target
 
 #Test loader    
