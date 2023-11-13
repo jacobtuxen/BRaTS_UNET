@@ -23,6 +23,7 @@ from UNET3D.visualize import visualize_model_output
 from UNET3D.data_loader import BrainDataset
 import time
 import wandb
+import gc
 
 WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
 USE_WANDB = True
@@ -74,6 +75,9 @@ def train_model(
     weights = torch.tensor([1.0, 18134.2673, 122.652088, 575.141447]).to(device)
     criterion = nn.CrossEntropyLoss(weight=weights) if model.n_classes > 1 else nn.BCEWithLogitsLoss()
     global_step = 0
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
+        gc.collect()
 
     # 5. Begin training
     all_epoch_losses = []
@@ -190,7 +194,7 @@ def run_model():
                     optimizer=wandb.config.optimizer,
                     wandb_active=True
                     )
-        
+
     else:
         train_model(model=model, device=device)
 
