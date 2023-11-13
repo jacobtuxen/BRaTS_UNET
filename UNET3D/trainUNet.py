@@ -25,7 +25,7 @@ import wandb
 import gc
 
 WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
-USE_WANDB = False
+USE_WANDB = True
 
 def train_model(
         model,
@@ -134,18 +134,17 @@ def train_model(
                             "train/learning_rate": optimizer.param_groups[0]['lr'],
                             "train/epoch": epoch,
                             "train/step": global_step,
-                            "train/accuracy": val_score.item()
                             })
     
-    if epoch % 1 == 0:
-            if USE_WANDB:
-                fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
-                wandb.log({
-                    "train/plot": fig,
-            })
-    val_score = evaluate(model, val_loader, device, amp)
-    all_accuracy.append(val_score.item())
-    scheduler.step(val_score)
+        if epoch % 1 == 0:
+                if USE_WANDB:
+                    fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
+                    wandb.log({
+                        "train/plot": fig,
+                })
+        val_score = evaluate(model, val_loader, device, amp)
+        all_accuracy.append(val_score.item())
+        scheduler.step(val_score)
 
 #LOGIN
 if USE_WANDB:

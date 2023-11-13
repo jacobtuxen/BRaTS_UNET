@@ -100,17 +100,51 @@ class UNet3D(nn.Module):
         self.up2 = (Up(128, 64 // factor, trilinear))
         self.up3 = (Up(64, 32, trilinear))
         self.outc = (OutConv(32, n_classes))
+        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def forward(self, x):
+        def print_memory_usage():
+            if self.device.type == 'cuda':
+                print(f'Current memory allocated: {torch.cuda.memory_allocated(self.device)/1024**3:.2f} GB')
+                print(f'Max memory allocated: {torch.cuda.max_memory_allocated(self.device)/1024**3:.2f} GB')
+                print(f'Current memory cached: {torch.cuda.memory_reserved(self.device)/1024**3:.2f} GB')
+                print(f'Max memory cached: {torch.cuda.max_memory_reserved(self.device)/1024**3:.2f} GB')
+
+        print_memory_usage()
         x1 = self.inc(x)
+        print("Memory usage after inc function:")
+        print_memory_usage()
+
         x2 = self.down1(x1)
+        print("Memory usage after down1 function:")
+        print_memory_usage()
+
         x3 = self.down2(x2)
+        print("Memory usage after down2 function:")
+        print_memory_usage()
+
         x4 = self.down3(x3)
+        print("Memory usage after down3 function:")
+        print_memory_usage()
+
         x = self.up1(x4, x3)
+        print("Memory usage after up1 function:")
+        print_memory_usage()
+
         x = self.up2(x, x2)
+        print("Memory usage after up2 function:")
+        print_memory_usage()
+
         x = self.up3(x, x1)
+        print("Memory usage after up3 function:")
+        print_memory_usage()
+
         logits = self.outc(x)
+        print("Memory usage after outc function:")
+        print_memory_usage()
+
         return logits
+
 
 # Content from: UNET3D/utils/dice_score.py
 import torch
@@ -245,7 +279,7 @@ def evaluate(net, dataloader, device, amp):
             image, mask_true = batch[0], batch[1]
 
             # move images and labels to correct device and type
-            image = image.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
+            image = image.to(device=device, dtype=torch.float32)
             mask_true = mask_true.to(device=device, dtype=torch.long)
             mask_true = torch.argmax(mask_true, dim=1)
 
@@ -288,12 +322,11 @@ from torch.utils.data import DataLoader, random_split
 from tqdm import tqdm
 from torch.utils.data import ConcatDataset
 from datetime import datetime
-import time
 import wandb
 import gc
 
 WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
-USE_WANDB = False
+USE_WANDB = True
 
 def train_model(
         model,
@@ -349,7 +382,6 @@ def train_model(
     # 5. Begin training
     all_epoch_losses = []
     all_accuracy = []
-    total_training_time = 0
     for epoch in range(1, epochs + 1):
         print('epoch started')
         if device.type == 'cuda':
@@ -360,7 +392,6 @@ def train_model(
         model.train()
         epoch_loss = 0
         for batch in train_loader:
-              start_time = time.time()  # start timing
               images, true_masks, patient_ids = batch
 
               assert images.shape[1] == model.n_channels, \
@@ -404,13 +435,7 @@ def train_model(
                             "train/learning_rate": optimizer.param_groups[0]['lr'],
                             "train/epoch": epoch,
                             "train/step": global_step,
-                            "train/epoch_training_time": epoch_training_time,
-                            "train/total_training_time": total_training_time,
-                            "train/accuracy": val_score.item()
                             })
-
-              epoch_training_time = time.time() - start_time  # end timing
-              total_training_time += epoch_training_time
     
     if epoch % 1 == 0:
             if USE_WANDB:
@@ -438,7 +463,7 @@ if USE_WANDB:
             "momentum": {"values": [0.9, 0.99]},
             "amp": {"values": [True, False]},
             "gradient_clipping": {"values": [0.1, 0.5, 1.0]},
-            "optimzer": {"values": ["RMSprop"]},
+            "optimizer": {"values": ["RMSprop"]},
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")

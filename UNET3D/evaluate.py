@@ -17,7 +17,7 @@ def evaluate(net, dataloader, device, amp):
             image, mask_true = batch[0], batch[1]
 
             # move images and labels to correct device and type
-            image = image.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
+            image = image.to(device=device, dtype=torch.float32)
             mask_true = mask_true.to(device=device, dtype=torch.long)
             mask_true = torch.argmax(mask_true, dim=1)
 
