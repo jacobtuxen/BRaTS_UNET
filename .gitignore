@@ -3,3 +3,4 @@ __pycachce__/
 .DS_Store
 *.DS_Store
 wandb/*
+data/
