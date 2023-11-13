@@ -9,6 +9,7 @@ first_files = [
     "UNET3D/unet_model/unet_parts.py",
     "UNET3D/unet_model/unet_model.py",
     "UNET3D/utils/dice_score.py",
+    "UNET3D/visualize.py",
 ]
 
 # Specify files to be excluded
@@ -42,7 +43,8 @@ ignored_imports = [
     "from evaluate import evaluate",
     "from utils.dice_score import dice_loss",
     "from predictions import plot_predictions",
-    "from UNET3D.data_loader import BrainDataset"
+    "from UNET3D.data_loader import BrainDataset",
+    "from UNET3D.visualize import visualize_model_output"
 ]
 
 with open(output_file_path, 'w', encoding='utf-8') as output_file:

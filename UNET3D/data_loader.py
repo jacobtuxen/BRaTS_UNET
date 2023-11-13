@@ -34,7 +34,7 @@ class BrainDataset(Dataset):
         data = F.normalize(data, p=2, dim=0)
         
 
-        return data, target
+        return data, target, patient_id
 
 #Test loader    
 patient_ids = ['BraTS2021_00495']

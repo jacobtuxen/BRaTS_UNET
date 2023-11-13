@@ -19,7 +19,7 @@ from datetime import datetime
 from evaluate import evaluate
 from unet_model.unet_model import UNet3D
 from utils.dice_score import dice_loss
-from predictions import plot_predictions
+from UNET3D.visualize import visualize_model_output
 from UNET3D.data_loader import BrainDataset
 import time
 import wandb
@@ -30,7 +30,7 @@ USE_WANDB = False
 def train_model(
         model,
         device,
-        epochs: int = 1,
+        epochs: int = 5,
         batch_size: int = 1,
         learning_rate: float = 1e-5,
         amp: bool = False,
@@ -105,7 +105,7 @@ def train_model(
         epoch_loss = 0
         for batch in train_loader:
               start_time = time.time()  # start timing
-              images, true_masks = batch[0], batch[1]
+              images, true_masks, patient_ids = batch
 
               assert images.shape[1] == model.n_channels, \
                   f'Network has been defined with {model.n_channels} input channels, ' \
@@ -141,6 +141,13 @@ def train_model(
               global_step += 1
               epoch_loss += loss.item()
               all_epoch_losses.append(epoch_loss)
+
+              if epoch % 1 == 0:
+                if USE_WANDB:
+                    fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
+                    wandb.log({
+                        "train/plot": fig,
+                    })
 
               #LOG WANDB
               if wandb_active:
@@ -180,7 +187,7 @@ if USE_WANDB:
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
-model = UNet3D(n_channels=4, n_classes=4, bilinear=True)
+model = UNet3D(n_channels=4, n_classes=3, bilinear=True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device=device)
 if USE_WANDB:
