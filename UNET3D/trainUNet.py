@@ -142,13 +142,6 @@ def train_model(
               epoch_loss += loss.item()
               all_epoch_losses.append(epoch_loss)
 
-              if epoch % 1 == 0:
-                if USE_WANDB:
-                    fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
-                    wandb.log({
-                        "train/plot": fig,
-                    })
-
               #LOG WANDB
               if wandb_active:
                 wandb.log({"train/train_loss": epoch_loss,
@@ -162,7 +155,13 @@ def train_model(
 
               epoch_training_time = time.time() - start_time  # end timing
               total_training_time += epoch_training_time
-
+    
+    if epoch % 1 == 0:
+            if USE_WANDB:
+                fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
+                wandb.log({
+                    "train/plot": fig,
+            })
     val_score = evaluate(model, val_loader, device, amp)
     all_accuracy.append(val_score.item())
     scheduler.step(val_score)
