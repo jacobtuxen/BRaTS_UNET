@@ -171,24 +171,32 @@ if USE_WANDB:
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
-model = UNet3D(n_channels=4, n_classes=4, trilinear=True)
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = model.to(device=device)
+
+def run_model():
+    model = UNet3D(n_channels=4, n_classes=4, trilinear=True)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model.to(device=device)
+    if USE_WANDB:
+        wandb.init(config=sweep_configuration)
+        train_model(model=model, 
+                    device=device, 
+                    epochs=wandb.config.epochs, 
+                    batch_size=wandb.config.batch_size, 
+                    learning_rate=wandb.config.lr,
+                    amp=wandb.config.amp,
+                    weight_decay=wandb.config.weight_decay, 
+                    momentum=wandb.config.momentum, 
+                    gradient_clipping=wandb.config.gradient_clipping,
+                    optimizer=wandb.config.optimizer,
+                    wandb_active=True
+                    )
+        
+    else:
+        train_model(model=model, device=device)
+
 if USE_WANDB:
-    wandb.init(config=sweep_configuration)
-    train_model(model=model, 
-                device=device, 
-                epochs=wandb.config.epochs, 
-                batch_size=wandb.config.batch_size, 
-                learning_rate=wandb.config.lr,
-                amp=wandb.config.amp,
-                weight_decay=wandb.config.weight_decay, 
-                momentum=wandb.config.momentum, 
-                gradient_clipping=wandb.config.gradient_clipping,
-                optimizer=wandb.config.optimizer,
-                wandb_active=True
-                )
-    wandb.agent(sweep_id, function=train_model, count=20)
+    wandb.agent(sweep_id, function=run_model, count=20)
 else:
-    train_model(model=model, device=device)
-    print("Training done!")
+    run_model()
+
+print("Training done!")
