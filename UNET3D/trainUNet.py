@@ -24,8 +24,8 @@ from UNET3D.data_loader import BrainDataset
 import time
 import wandb
 
-WANDB_API_KEY=""
-USE_WANDB = False
+WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
+USE_WANDB = True
 
 def train_model(
         model,
@@ -41,22 +41,7 @@ def train_model(
         wandb_active = False,
 ):
     # 0. Set up loggin for wandb
-    #setup wandb
-    if wandb_active:
-        wandb.init(
-            project=f"UNE3D_{timestamp}",
-            config={
-                "epochs": {epochs},
-                "batch_size": {batch_size},
-                "learning_rate": {learning_rate},
-                "optimizer": {optimizer},
-                "amp": {amp},
-                "weight_decay": {weight_decay},
-                "momentum": {momentum},
-                "gradient_clipping": {gradient_clipping}
-            }
-        )
-    
+    #setup wandb    
 
     # 1. Create dataset #Note this is for testing
     data_dir = Path('/work3/s211469/data')
@@ -113,7 +98,7 @@ def train_model(
                   'the images are loaded correctly.'
 
               images = images.to(device=device, dtype=torch.float32)
-              true_masks = true_masks.to(device=device, dtype=torch.long)
+              true_masks = true_masks.to(device=device, dtype=torch.long).unsqueeze(1)
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                   masks_pred = model(images)
@@ -122,13 +107,13 @@ def train_model(
                       loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
                   else:
                       true_masks = torch.argmax(true_masks, dim=1)
-                    #   print(f"masks_pred shape: {masks_pred.shape}, dtype: {masks_pred.dtype}")
-                    #   print(f"true_masks shape: {true_masks.shape}, dtype: {true_masks.dtype}")
-                    #   print(f"Unique values in true_masks: {torch.unique(true_masks)}")
+                      print(f"masks_pred shape: {masks_pred.shape}, dtype: {masks_pred.dtype}")
+                      print(f"true_masks shape: {true_masks.shape}, dtype: {true_masks.dtype}")
+                      print(f"Unique values in true_masks: {torch.unique(true_masks)}")
                       loss = criterion(masks_pred, true_masks)
                       loss += dice_loss(
                           F.softmax(masks_pred, dim=1).float(),
-                          F.one_hot(true_masks, model.n_classes).permute(0, 3, 1, 2).float(),
+                          F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(),
                           multiclass=True
                       )
 
@@ -186,10 +171,11 @@ if USE_WANDB:
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
-model = UNet3D(n_channels=4, n_classes=3, trilinear=True)
+model = UNet3D(n_channels=4, n_classes=4, trilinear=True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device=device)
 if USE_WANDB:
+    wandb.init(config=sweep_configuration)
     train_model(model=model, 
                 device=device, 
                 epochs=wandb.config.epochs, 
