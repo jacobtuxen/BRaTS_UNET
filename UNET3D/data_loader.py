@@ -3,6 +3,7 @@ from torch.utils.data import Dataset
 import nibabel as nib
 import numpy as np
 from pathlib import Path
+import torch.nn.functional as F
 
 class BrainDataset(Dataset):
     def __init__(self, patient_ids: list, data_dir: Path):
@@ -28,6 +29,9 @@ class BrainDataset(Dataset):
         
         data = data[:,start_idx:end_idx,start_idx:end_idx,:]
         target = target[start_idx:end_idx,start_idx:end_idx,:]
+        
+        #Normalize
+        data = F.normalize(data, p=2, dim=0)
         
 
         return data, target

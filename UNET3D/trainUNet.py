@@ -30,7 +30,7 @@ USE_WANDB = False
 def train_model(
         model,
         device,
-        epochs: int = 5,
+        epochs: int = 1,
         batch_size: int = 1,
         learning_rate: float = 1e-5,
         amp: bool = False,
@@ -180,7 +180,7 @@ if USE_WANDB:
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
-model = UNet3D(n_channels=4, n_classes=3, bilinear=True)
+model = UNet3D(n_channels=4, n_classes=4, bilinear=True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device=device)
 if USE_WANDB:
