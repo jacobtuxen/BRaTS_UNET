@@ -12,7 +12,7 @@ UNET for BRaTS dataset.
 - [ ] Investigate distribution of labels --> Christian
 - [ ] Data augementation (rotation, noise, sampling) --> Mads
 - [ ] Gemme trænings plot lokalt --> Jacob
-#f03c15 - [ ] HPC, og debugging -> Jacob
+- [ ] HPC, og debugging -> Jacob
 - [ ] Define output of model, (structurize)
 - [ ] Setup HPC and push data
 - [ ] [RESEARCH] Investigate feature maps
