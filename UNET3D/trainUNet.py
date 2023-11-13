@@ -21,7 +21,6 @@ from unet_model.unet_model import UNet3D
 from utils.dice_score import dice_loss
 from UNET3D.visualize import visualize_model_output
 from UNET3D.data_loader import BrainDataset
-import time
 import wandb
 import gc
 
@@ -82,7 +81,6 @@ def train_model(
     # 5. Begin training
     all_epoch_losses = []
     all_accuracy = []
-    total_training_time = 0
     for epoch in range(1, epochs + 1):
         print('epoch started')
         if device.type == 'cuda':
@@ -93,7 +91,6 @@ def train_model(
         model.train()
         epoch_loss = 0
         for batch in train_loader:
-              start_time = time.time()  # start timing
               images, true_masks, patient_ids = batch
 
               assert images.shape[1] == model.n_channels, \
@@ -137,13 +134,8 @@ def train_model(
                             "train/learning_rate": optimizer.param_groups[0]['lr'],
                             "train/epoch": epoch,
                             "train/step": global_step,
-                            "train/epoch_training_time": epoch_training_time,
-                            "train/total_training_time": total_training_time,
                             "train/accuracy": val_score.item()
                             })
-
-              epoch_training_time = time.time() - start_time  # end timing
-              total_training_time += epoch_training_time
     
     if epoch % 1 == 0:
             if USE_WANDB:
