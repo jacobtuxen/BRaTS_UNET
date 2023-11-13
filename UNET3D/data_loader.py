@@ -8,38 +8,26 @@ class BrainDataset(Dataset):
     def __init__(self, patient_ids: list, data_dir: Path):
         self.patient_ids = patient_ids
         self.data_dir = data_dir
-        self.data = []
 
-        self.init_data()
+    def load_nifti_file(self, file_path):
+        return nib.load(file_path).get_fdata()
 
-    def init_data(self):
-        ids = ['flair.nii.gz','t1.nii.gz', 't1ce.nii.gz', 't2.nii.gz','seg.nii.gz']
-        for patient_id in self.patient_ids:
-            self.data.append([nib.load(self.data_dir / patient_id / f'{patient_id}_{id}').get_fdata() for id in ids])
     def __len__(self):
         return len(self.data)
-
+    
     def __getitem__(self, idx):
-        flair, t1, t1c ,t2, target = self.data[idx]
-        t1 = torch.from_numpy(t1).float16()
-        t1c = torch.from_numpy(t1c).float16()
-        t2 = torch.from_numpy(t2).float16()
-        flair = torch.from_numpy(flair).float16()
-        target = torch.from_numpy(target).float16()
+        patient_id = self.patient_ids[idx]
+        data_paths = [self.data_dir / patient_id / f'{patient_id}_{data_id}' for data_id in ['flair.nii.gz','t1.nii.gz', 't1ce.nii.gz', 't2.nii.gz','seg.nii.gz']]
+        data = [self.load_nifti_file(path) for path in data_paths]
+        target = torch.from_numpy(np.where(data[4]==4, 3, data[4])).long()
+        #Cat
+        data = torch.cat([torch.from_numpy(data[i]).unsqueeze(0) for i in range(4)], dim=0)
+        return data, target
 
-        #Normalize
-        t1 = (t1 - t1.mean()) / t1.std()+1e-8
-        t1c = (t1c - t1c.mean()) / t1c.std()+1e-8
-        t2 = (t2 - t2.mean()) / t2.std()+1e-8
-        flair = (flair - flair.mean()) / flair.std()+1e-8
-
-        t1 = t1.unsqueeze(0)
-        t1c = t1c.unsqueeze(0)
-        t2 = t2.unsqueeze(0)
-        flair = flair.unsqueeze(0)
-        target = target.unsqueeze(0)
-
-        #Input data size [B,C,W,D,H] 
-        #Concatenate t1,t1c,t2,flair
-        x = torch.concatenate((t1,t1c,t2,flair), dim=0)
-        return x, target
+#Test loader    
+patient_ids = ['BraTS2021_00495']
+data_dir = Path.home() / 'Documents' / 'DTU' / 'E23' / '02456_Deep_Learning' / 'Brain_Project' / 'BRaTS_UNET' / 'data' / 'archive'
+dataset = BrainDataset(patient_ids, data_dir)
+data, target = dataset[0]
+print(data.shape)
+print(target.shape)
