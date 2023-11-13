@@ -79,8 +79,6 @@ def train_model(
         gc.collect()
 
     # 5. Begin training
-    all_epoch_losses = []
-    all_accuracy = []
     for epoch in range(1, epochs + 1):
         print('epoch started')
         if device.type == 'cuda':
@@ -126,14 +124,12 @@ def train_model(
 
               global_step += 1
               epoch_loss += loss.item()
-              all_epoch_losses.append(epoch_loss)
 
               #LOG WANDB
               if wandb_active:
-                wandb.log({"train/train_loss": epoch_loss,
+                wandb.log({"train/train_loss": loss.item(),
                             "train/learning_rate": optimizer.param_groups[0]['lr'],
                             "train/epoch": epoch,
-                            "train/step": global_step,
                             })
     
         if epoch % 1 == 0:
@@ -143,8 +139,8 @@ def train_model(
                         "train/plot": fig,
                 })
         val_score = evaluate(model, val_loader, device, amp)
-        all_accuracy.append(val_score.item())
         scheduler.step(val_score)
+        wandb.log({"val_acc": val_score})
 
 #LOGIN
 if USE_WANDB:
@@ -190,7 +186,7 @@ def run_model():
         train_model(model=model, device=device)
 
 if USE_WANDB:
-    wandb.agent(sweep_id, function=run_model, count=20)
+    wandb.agent(sweep_id, function=run_model, count=2)
 else:
     run_model()
 
