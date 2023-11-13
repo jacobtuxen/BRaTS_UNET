@@ -14,6 +14,7 @@ first_files = [
 # Specify files to be excluded
 excluded_files = [
     "UNET3D/merger_unet.py",
+    "UNET3D/unet_model/count_parameters.py",
     # "UNET/test.py",
 ]
 
