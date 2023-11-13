@@ -91,30 +91,24 @@ class UNet3D(nn.Module):
         self.n_classes = n_classes
         self.trilinear = trilinear
 
-        self.batchnorm = nn.BatchNorm3d(n_channels)
-        self.inc = (DoubleConv(n_channels, 64))
-        self.down1 = (Down(64, 128))
-        self.down2 = (Down(128, 256))
-        self.down3 = (Down(256, 512))
+        self.inc = (DoubleConv(n_channels, 32))
+        self.down1 = (Down(32, 64))
+        self.down2 = (Down(64, 128))
+        self.down3 = (Down(128, 256))
         factor = 2 if trilinear else 1
-        self.down4 = (Down(512, 1024 // factor))
-        self.up1 = (Up(1024, 512 // factor, trilinear))
-        self.up2 = (Up(512, 256 // factor, trilinear))
-        self.up3 = (Up(256, 128 // factor, trilinear))
-        self.up4 = (Up(128, 64, trilinear))
-        self.outc = (OutConv(64, n_classes))
+        self.up1 = (Up(256, 128 // factor, trilinear))
+        self.up2 = (Up(128, 64 // factor, trilinear))
+        self.up3 = (Up(64, 32, trilinear))
+        self.outc = (OutConv(32, n_classes))
 
     def forward(self, x):
-        x1 = self.batchnorm(x)
         x1 = self.inc(x)
         x2 = self.down1(x1)
         x3 = self.down2(x2)
         x4 = self.down3(x3)
-        x5 = self.down4(x4)
-        x = self.up1(x5, x4)
-        x = self.up2(x, x3)
-        x = self.up3(x, x2)
-        x = self.up4(x, x1)
+        x = self.up1(x4, x3)
+        x = self.up2(x, x2)
+        x = self.up3(x, x1)
         logits = self.outc(x)
         return logits
 
@@ -296,9 +290,10 @@ from torch.utils.data import ConcatDataset
 from datetime import datetime
 import time
 import wandb
+import gc
 
 WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
-USE_WANDB = True
+USE_WANDB = False
 
 def train_model(
         model,
@@ -347,6 +342,9 @@ def train_model(
     weights = torch.tensor([1.0, 18134.2673, 122.652088, 575.141447]).to(device)
     criterion = nn.CrossEntropyLoss(weight=weights) if model.n_classes > 1 else nn.BCEWithLogitsLoss()
     global_step = 0
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
+        gc.collect()
 
     # 5. Begin training
     all_epoch_losses = []
@@ -444,25 +442,33 @@ if USE_WANDB:
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
-model = UNet3D(n_channels=4, n_classes=4, trilinear=True)
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = model.to(device=device)
+
+def run_model():
+    model = UNet3D(n_channels=4, n_classes=4, trilinear=False)
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model.to(device=device)
+    if USE_WANDB:
+        wandb.init(config=sweep_configuration)
+        train_model(model=model, 
+                    device=device, 
+                    epochs=wandb.config.epochs, 
+                    batch_size=wandb.config.batch_size, 
+                    learning_rate=wandb.config.lr,
+                    amp=wandb.config.amp,
+                    weight_decay=wandb.config.weight_decay, 
+                    momentum=wandb.config.momentum, 
+                    gradient_clipping=wandb.config.gradient_clipping,
+                    optimizer=wandb.config.optimizer,
+                    wandb_active=True
+                    )
+
+    else:
+        train_model(model=model, device=device)
+
 if USE_WANDB:
-    wandb.init(config=sweep_configuration)
-    train_model(model=model, 
-                device=device, 
-                epochs=wandb.config.epochs, 
-                batch_size=wandb.config.batch_size, 
-                learning_rate=wandb.config.lr,
-                amp=wandb.config.amp,
-                weight_decay=wandb.config.weight_decay, 
-                momentum=wandb.config.momentum, 
-                gradient_clipping=wandb.config.gradient_clipping,
-                optimizer=wandb.config.optimizer,
-                wandb_active=True
-                )
-    wandb.agent(sweep_id, function=train_model, count=20)
+    wandb.agent(sweep_id, function=run_model, count=20)
 else:
-    train_model(model=model, device=device)
-    print("Training done!")
+    run_model()
+
+print("Training done!")
 

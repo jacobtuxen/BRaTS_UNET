@@ -26,7 +26,7 @@ import wandb
 import gc
 
 WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
-USE_WANDB = True
+USE_WANDB = False
 
 def train_model(
         model,
@@ -171,13 +171,13 @@ if USE_WANDB:
             "momentum": {"values": [0.9, 0.99]},
             "amp": {"values": [True, False]},
             "gradient_clipping": {"values": [0.1, 0.5, 1.0]},
-            "optimzer": {"values": ["RMSprop"]},
+            "optimizer": {"values": ["RMSprop"]},
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
 
 def run_model():
-    model = UNet3D(n_channels=4, n_classes=4, trilinear=True)
+    model = UNet3D(n_channels=4, n_classes=4, trilinear=False)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device=device)
     if USE_WANDB:
