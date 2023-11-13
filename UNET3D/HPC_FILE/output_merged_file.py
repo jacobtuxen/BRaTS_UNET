@@ -43,11 +43,11 @@ class Down(nn.Module):
 class Up(nn.Module):
     """Upscaling then double conv"""
 
-    def __init__(self, in_channels, out_channels, bilinear=True):
+    def __init__(self, in_channels, out_channels, trilinear=True):
         super().__init__()
 
-        # if bilinear, use the normal convolutions to reduce the number of channels
-        if bilinear:
+        # if trilinear, use the normal convolutions to reduce the number of channels
+        if trilinear:
             self.up = nn.Upsample(scale_factor=2, mode='trilinear', align_corners=True)
             self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
         else:
@@ -85,25 +85,27 @@ class OutConv(nn.Module):
 
 
 class UNet3D(nn.Module):
-    def __init__(self, n_channels, n_classes, bilinear=False):
+    def __init__(self, n_channels, n_classes, trilinear=False):
         super(UNet3D, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
-        self.bilinear = bilinear
+        self.trilinear = trilinear
 
+        self.batchnorm = nn.BatchNorm3d(n_channels)
         self.inc = (DoubleConv(n_channels, 64))
         self.down1 = (Down(64, 128))
         self.down2 = (Down(128, 256))
         self.down3 = (Down(256, 512))
-        factor = 2 if bilinear else 1
+        factor = 2 if trilinear else 1
         self.down4 = (Down(512, 1024 // factor))
-        self.up1 = (Up(1024, 512 // factor, bilinear))
-        self.up2 = (Up(512, 256 // factor, bilinear))
-        self.up3 = (Up(256, 128 // factor, bilinear))
-        self.up4 = (Up(128, 64, bilinear))
+        self.up1 = (Up(1024, 512 // factor, trilinear))
+        self.up2 = (Up(512, 256 // factor, trilinear))
+        self.up3 = (Up(256, 128 // factor, trilinear))
+        self.up4 = (Up(128, 64, trilinear))
         self.outc = (OutConv(64, n_classes))
 
     def forward(self, x):
+        x1 = self.batchnorm(x)
         x1 = self.inc(x)
         x2 = self.down1(x1)
         x3 = self.down2(x2)
@@ -115,18 +117,6 @@ class UNet3D(nn.Module):
         x = self.up4(x, x1)
         logits = self.outc(x)
         return logits
-
-    def use_checkpointing(self):
-        self.inc = torch.utils.checkpoint(self.inc)
-        self.down1 = torch.utils.checkpoint(self.down1)
-        self.down2 = torch.utils.checkpoint(self.down2)
-        self.down3 = torch.utils.checkpoint(self.down3)
-        self.down4 = torch.utils.checkpoint(self.down4)
-        self.up1 = torch.utils.checkpoint(self.up1)
-        self.up2 = torch.utils.checkpoint(self.up2)
-        self.up3 = torch.utils.checkpoint(self.up3)
-        self.up4 = torch.utils.checkpoint(self.up4)
-        self.outc = torch.utils.checkpoint(self.outc)
 
 # Content from: UNET3D/utils/dice_score.py
 import torch
@@ -158,53 +148,84 @@ def dice_loss(input: Tensor, target: Tensor, multiclass: bool = False):
     fn = multiclass_dice_coeff if multiclass else dice_coeff
     return 1 - fn(input, target, reduce_batch_first=True)
 
+# Content from: UNET3D/visualize.py
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+import nibabel as nib
+
+def visualize_model_output(epoch, input, model, patient_id, device):
+  slices = np.linspace(10,150, 5)
+  plot_titles = ['flair','t1', 't1ce', 't2','seg']
+
+  model.eval()
+  with torch.no_grad():
+    input = input.squeeze(0).to(device)
+    output = model(input)
+  
+  fig, ax = plt.subplots(len(slices), 6, figsize=(15, 5))
+  originals = [nib.load(f'/work3/s211469/data/{patient_id}/{patient_id}_{titles}').get_fdata() for titles in ['flair.nii','t1.nii', 't1ce.nii', 't2.nii','seg.nii']]
+  for idj, slice_ in enumerate(slices):
+    for idx, original in enumerate(originals):
+      ax[idj, idx].imshow(original[:,:,slice_], cmap='gray')
+      ax[idj, idx].axis('off')
+      if idj == 0 and idx == 0:
+        ax[0, idx].set_title(f'E: {epoch}, {plot_titles[idx]}')
+      elif idj == 0:
+        ax[0, idx].set_title(f'{plot_titles[idx]}')
+    ax[idj, 5].imshow(output[:,:,slice_], cmap='gray')
+    ax[idj, 5].axis('off')
+    if idj == 0:
+      ax[0, 5].set_title(f'Prediction')
+  model.train()
+  return fig
+
 # Content from: UNET3D/data_loader.py
 import torch
 from torch.utils.data import Dataset
 import nibabel as nib
 import numpy as np
 from pathlib import Path
+import torch.nn.functional as F
 
 class BrainDataset(Dataset):
     def __init__(self, patient_ids: list, data_dir: Path):
         self.patient_ids = patient_ids
         self.data_dir = data_dir
-        self.data = []
 
-        self.init_data()
+    def load_nifti_file(self, file_path):
+        return nib.load(file_path).get_fdata()
 
-    def init_data(self):
-        ids = ['flair.nii.gz','t1.nii.gz', 't1ce.nii.gz', 't2.nii.gz','seg.nii.gz']
-        for patient_id in self.patient_ids:
-            self.data.append([nib.load(self.data_dir / patient_id / f'{patient_id}_{id}').get_fdata() for id in ids])
     def __len__(self):
-        return len(self.data)
-
+        return len(self.patient_ids)
+    
     def __getitem__(self, idx):
-        flair, t1, t1c ,t2, target = self.data[idx]
-        t1 = torch.from_numpy(t1).float16()
-        t1c = torch.from_numpy(t1c).float16()
-        t2 = torch.from_numpy(t2).float16()
-        flair = torch.from_numpy(flair).float16()
-        target = torch.from_numpy(target).float16()
+        patient_id = self.patient_ids[idx]
+        data_paths = [self.data_dir / patient_id / f'{patient_id}_{data_id}' for data_id in ['flair.nii','t1.nii', 't1ce.nii', 't2.nii','seg.nii']]
+        data = [self.load_nifti_file(path) for path in data_paths]
+        target = torch.from_numpy(np.where(data[4]==4, 3, data[4])).long()
+        #Cat
+        data = torch.cat([torch.from_numpy(data[i]).unsqueeze(0) for i in range(4)], dim=0)
 
+        start_idx = (data.shape[1]-160)//2
+        end_idx = (data.shape[1]+160)//2
+        
+        data = data[:,start_idx:end_idx,start_idx:end_idx,:]
+        target = target[start_idx:end_idx,start_idx:end_idx,:]
+        
         #Normalize
-        t1 = (t1 - t1.mean()) / t1.std()+1e-8
-        t1c = (t1c - t1c.mean()) / t1c.std()+1e-8
-        t2 = (t2 - t2.mean()) / t2.std()+1e-8
-        flair = (flair - flair.mean()) / flair.std()+1e-8
+        data = F.normalize(data, p=2, dim=0)
+        
 
-        t1 = t1.unsqueeze(0)
-        t1c = t1c.unsqueeze(0)
-        t2 = t2.unsqueeze(0)
-        flair = flair.unsqueeze(0)
-        target = target.unsqueeze(0)
+        return data, target, patient_id
 
-        #Input data size [B,C,W,D,H] 
-        #Concatenate t1,t1c,t2,flair
-        x = torch.concatenate((t1,t1c,t2,flair), dim=0)
-        return x, target
-
+#Test loader    
+# patient_ids = ['BraTS2021_00495']
+# data_dir = Path.home() / 'Documents' / 'DTU' / 'E23' / '02456_Deep_Learning' / 'Brain_Project' / 'BRaTS_UNET' / 'data' / 'archive'
+# dataset = BrainDataset(patient_ids, data_dir)
+# data, target = dataset[0]
+# print(data.shape)
+# print(target.shape)
 
 # Content from: UNET3D/evaluate.py
 import torch
@@ -248,40 +269,6 @@ def evaluate(net, dataloader, device, amp):
 
     net.train()
     return dice_score / max(num_val_batches, 1)
-
-# Content from: UNET3D/predictions.py
-import matplotlib.pyplot as plt
-import numpy as np
-import os
-import torch
-
-
-def plot_predictions(model, device, input, target):
-    #input is (b,c,w,h,d)
-    with torch.no_grad:
-        pred = model(input)
-    pred = pred.numpy()
-    target = target.numpy()
-    input = input.numpy()
-
-    fig = plt.figure()
-    plot_titles = ['t1', 't1c', 't2', 'flair', 'gt', 'pred']
-    n_slices = 5
-    slices = np.linspace(20,140, n_slices)
-    for idx_i, slice in enumerate(slices):
-        for idx_j, title in enumerate(plot_titles):
-            plt.subplot(n_slices*len(plot_titles), idx_j % len(plot_titles + idx_i * len(plot_titles + 1)))
-            if idx_j <= 3:
-                plt.imshow(input[0,idx_j,:,:,slice])
-            if idx_j == 4:
-                plt.imshow(target[0,idx_j,:,:,slice])
-            else:
-                plt.imshow(pred[0,idx_j,:,:,slice])
-            if idx_i == 0:
-                plt.title(title)
-    return fig
-
-
 
 # Content from: UNET3D/trainUNet.py
 
@@ -340,15 +327,18 @@ def train_model(
     
 
     # 1. Create dataset #Note this is for testing
-    patient_ids = ['BraTS2021_00380']
-    data_dir = Path.home() /'02456_Deep_Learning' / 'data'
-    dataset = BrainDataset(patient_ids=patient_ids, data_dir=data_dir)
-    train_set = dataset
-    dataset_val = BrainDataset(patient_ids=patient_ids, data_dir=data_dir)
-    val_set = dataset_val
-    
-    # 3. Create data loaders set numworkers=os.cpu_count() for faster data loading
-    loader_args = dict(batch_size=batch_size, num_workers=4, pin_memory=True)
+    data_dir = Path('/work3/s211469/data')
+    patient_ids = np.loadtxt(data_dir / 'filenames.txt', dtype=str)
+    val_pct = 0.1
+    val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
+    training_ids = [id for id in patient_ids if id not in val_ids]
+
+    # 1. Create dataset and validation set
+    train_set = BrainDataset(patient_ids=training_ids, data_dir=data_dir)
+    val_set = BrainDataset(patient_ids=val_ids, data_dir=data_dir)
+
+    # 3. Create data loaders set numworkers=4 as requested on HPC for faster data loading
+    loader_args = dict(batch_size=batch_size, num_workers=4)
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
 
@@ -364,7 +354,8 @@ def train_model(
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
+    weights = torch.tensor([1.0, 18134.2673, 122.652088, 575.141447]).to(device)
+    criterion = nn.CrossEntropyLoss(weight=weights) if model.n_classes > 1 else nn.BCEWithLogitsLoss()
     global_step = 0
 
     # 5. Begin training
@@ -373,19 +364,23 @@ def train_model(
     total_training_time = 0
     for epoch in range(1, epochs + 1):
         print('epoch started')
+        if device.type == 'cuda':
+            print(f'Current memory allocated: {torch.cuda.memory_allocated(device)/1024**3:.2f} GB')
+            print(f'Max memory allocated: {torch.cuda.max_memory_allocated(device)/1024**3:.2f} GB')
+            print(f'Current memory cached: {torch.cuda.memory_reserved(device)/1024**3:.2f} GB')
+            print(f'Max memory cached: {torch.cuda.max_memory_reserved(device)/1024**3:.2f} GB')
         model.train()
         epoch_loss = 0
         for batch in train_loader:
               start_time = time.time()  # start timing
-              images, true_masks = batch[0], batch[1]
-              
+              images, true_masks, patient_ids = batch
 
               assert images.shape[1] == model.n_channels, \
                   f'Network has been defined with {model.n_channels} input channels, ' \
                   f'but loaded images have {images.shape[1]} channels. Please check that ' \
                   'the images are loaded correctly.'
 
-              images = images.to(device=device, dtype=torch.float32, memory_format=torch.channels_last)
+              images = images.to(device=device, dtype=torch.float32)
               true_masks = true_masks.to(device=device, dtype=torch.long)
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
@@ -428,40 +423,38 @@ def train_model(
 
               epoch_training_time = time.time() - start_time  # end timing
               total_training_time += epoch_training_time
-
+    
+    if epoch % 1 == 0:
+            if USE_WANDB:
+                fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
+                wandb.log({
+                    "train/plot": fig,
+            })
     val_score = evaluate(model, val_loader, device, amp)
     all_accuracy.append(val_score.item())
-    if wandb_active:
-        fig = plot_predictions(model, device, images, true_masks)
-        wandb.log({"val/val_accuracy": val_score.item(),
-        })
     scheduler.step(val_score)
-
-timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-name_indentifier = f'UNet_BRaTS{timestamp}_'
-dir_checkpoint = Path(f'./cp_{name_indentifier}/')
-info_file = f'info_{name_indentifier}.txt'
 
 #LOGIN
 if USE_WANDB:
+    timestamp = datetime.now().strftime("%Y%d%m-%H%M%S")
     wandb.login(key=WANDB_API_KEY)
     sweep_configuration = {
         "method": "random",
         "name": "sweep",
         "metric": {"goal": "maximize", "name": "val/val_accuracy"},
         "parameters": {
-            "batch_size": {"values": [16, 32, 64, 128]},
+            "batch_size": {"values": [1,2,4]},
             "lr": {"max": 1e-3, "min": 1e-6},
             "epochs": {"values": [30,60,100]},
             "weight_decay": {"max": 1e-3, "min": 1e-6},
             "momentum": {"values": [0.9, 0.99]},
             "amp": {"values": [True, False]},
             "gradient_clipping": {"values": [0.1, 0.5, 1.0]},
-            "optimzer": {"values": ["Adam", "RMSprop", "SGD"]},
+            "optimzer": {"values": ["RMSprop"]},
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
-model = UNet3D(n_channels=4, n_classes=3, bilinear=True)
+model = UNet3D(n_channels=4, n_classes=3, trilinear=True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device=device)
 if USE_WANDB:
@@ -477,7 +470,7 @@ if USE_WANDB:
                 optimizer=wandb.config.optimizer,
                 wandb_active=True
                 )
-    wandb.agent(sweep_id, function=train_model, count=4)
+    wandb.agent(sweep_id, function=train_model, count=20)
 else:
     train_model(model=model, device=device)
     print("Training done!")

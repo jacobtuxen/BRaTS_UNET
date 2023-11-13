@@ -1,7 +1,7 @@
 import torch
 import sys
 from pathlib import Path
-git_dir = Path.home() / 'Desktop' / 'Deep Learning' / 'BRaTS_UNET'#jacob path
+git_dir = Path.home() / 'Documents' / 'DTU' / 'E23' / '02456_Deep_Learning' / 'Brain_Project' / 'BRaTS_UNET'
 sys.path.append(str(git_dir))
 from UNET3D.unet_model.unet_model import UNet3D
 
