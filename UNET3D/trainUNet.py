@@ -30,7 +30,7 @@ USE_WANDB = False
 def train_model(
         model,
         device,
-        epochs: int = 5,
+        epochs: int = 1,
         batch_size: int = 1,
         learning_rate: float = 1e-5,
         amp: bool = False,

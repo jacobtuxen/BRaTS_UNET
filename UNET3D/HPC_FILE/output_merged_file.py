@@ -209,6 +209,11 @@ class BrainDataset(Dataset):
 
         start_idx = (data.shape[1]-160)//2
         end_idx = (data.shape[1]+160)//2
+
+        data = F.pad(data, (0, 160 - data.shape[3], 0, 0)) 
+        target = F.pad(target, (0, 160 - target.shape[2], 0, 0, 0, 0))
+
+
         
         data = data[:,start_idx:end_idx,start_idx:end_idx,:]
         target = target[start_idx:end_idx,start_idx:end_idx,:]
@@ -223,7 +228,7 @@ class BrainDataset(Dataset):
 # patient_ids = ['BraTS2021_00495']
 # data_dir = Path.home() / 'Documents' / 'DTU' / 'E23' / '02456_Deep_Learning' / 'Brain_Project' / 'BRaTS_UNET' / 'data' / 'archive'
 # dataset = BrainDataset(patient_ids, data_dir)
-# data, target = dataset[0]
+# data, target,_ = dataset[0]
 # print(data.shape)
 # print(target.shape)
 
@@ -298,7 +303,7 @@ USE_WANDB = False
 def train_model(
         model,
         device,
-        epochs: int = 5,
+        epochs: int = 1,
         batch_size: int = 1,
         learning_rate: float = 1e-5,
         amp: bool = False,
