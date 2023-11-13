@@ -187,7 +187,7 @@ if USE_WANDB:
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
-model = UNet3D(n_channels=4, n_classes=3, bilinear=True)
+model = UNet3D(n_channels=4, n_classes=3, trilinear=True)
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model = model.to(device=device)
 if USE_WANDB:

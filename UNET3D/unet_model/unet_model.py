@@ -4,23 +4,23 @@ from .unet_parts import *
 
 
 class UNet3D(nn.Module):
-    def __init__(self, n_channels, n_classes, bilinear=False):
+    def __init__(self, n_channels, n_classes, trilinear=False):
         super(UNet3D, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
-        self.bilinear = bilinear
+        self.trilinear = trilinear
 
         self.batchnorm = nn.BatchNorm3d(n_channels)
         self.inc = (DoubleConv(n_channels, 64))
         self.down1 = (Down(64, 128))
         self.down2 = (Down(128, 256))
         self.down3 = (Down(256, 512))
-        factor = 2 if bilinear else 1
+        factor = 2 if trilinear else 1
         self.down4 = (Down(512, 1024 // factor))
-        self.up1 = (Up(1024, 512 // factor, bilinear))
-        self.up2 = (Up(512, 256 // factor, bilinear))
-        self.up3 = (Up(256, 128 // factor, bilinear))
-        self.up4 = (Up(128, 64, bilinear))
+        self.up1 = (Up(1024, 512 // factor, trilinear))
+        self.up2 = (Up(512, 256 // factor, trilinear))
+        self.up3 = (Up(256, 128 // factor, trilinear))
+        self.up4 = (Up(128, 64, trilinear))
         self.outc = (OutConv(64, n_classes))
 
     def forward(self, x):
