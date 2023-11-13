@@ -74,9 +74,7 @@ def train_model(
     weights = torch.tensor([1.0, 18134.2673, 122.652088, 575.141447]).to(device)
     criterion = nn.CrossEntropyLoss(weight=weights) if model.n_classes > 1 else nn.BCEWithLogitsLoss()
     global_step = 0
-    if device.type == 'cuda':
-        torch.cuda.empty_cache()
-        gc.collect()
+ 
 
     # 5. Begin training
     for epoch in range(1, epochs + 1):
@@ -124,6 +122,9 @@ def train_model(
 
               global_step += 1
               epoch_loss += loss.item()
+              if device.type == 'cuda':
+                torch.cuda.empty_cache()
+                gc.collect()
 
               #LOG WANDB
               if wandb_active:
@@ -131,6 +132,7 @@ def train_model(
                             "train/learning_rate": optimizer.param_groups[0]['lr'],
                             "train/epoch": epoch,
                             })
+                print("IMAGE IS PRINTED!!!")
     
         if epoch % 1 == 0:
                 if USE_WANDB:
