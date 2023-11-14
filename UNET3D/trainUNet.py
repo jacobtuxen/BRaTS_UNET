@@ -95,7 +95,7 @@ def train_model(
                   'the images are loaded correctly.'
 
               images = images.to(device=device, dtype=torch.float32)
-              true_masks = true_masks.to(device=device, dtype=torch.long).unsqueeze(1)
+              true_masks = true_masks.to(device=device, dtype=torch.long)
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                   masks_pred = model(images)
@@ -103,7 +103,6 @@ def train_model(
                       loss = criterion(masks_pred.squeeze(1), true_masks.float())
                       loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
                   else:
-                      true_masks = torch.argmax(true_masks, dim=1)
                       print(f"masks_pred shape: {masks_pred.shape}, dtype: {masks_pred.dtype}")
                       print(f"true_masks shape: {true_masks.shape}, dtype: {true_masks.dtype}")
                       print(f"Unique values in true_masks: {torch.unique(true_masks)}")

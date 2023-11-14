@@ -19,7 +19,6 @@ def evaluate(net, dataloader, device, amp):
             # move images and labels to correct device and type
             image = image.to(device=device, dtype=torch.float32)
             mask_true = mask_true.to(device=device, dtype=torch.long)
-            mask_true = torch.argmax(mask_true, dim=1)
 
 
             # predict the mask

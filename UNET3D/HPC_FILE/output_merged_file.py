@@ -281,7 +281,6 @@ def evaluate(net, dataloader, device, amp):
             # move images and labels to correct device and type
             image = image.to(device=device, dtype=torch.float32)
             mask_true = mask_true.to(device=device, dtype=torch.long)
-            mask_true = torch.argmax(mask_true, dim=1)
 
 
             # predict the mask
@@ -375,13 +374,9 @@ def train_model(
     weights = torch.tensor([1.0, 18134.2673, 122.652088, 575.141447]).to(device)
     criterion = nn.CrossEntropyLoss(weight=weights) if model.n_classes > 1 else nn.BCEWithLogitsLoss()
     global_step = 0
-    if device.type == 'cuda':
-        torch.cuda.empty_cache()
-        gc.collect()
+ 
 
     # 5. Begin training
-    all_epoch_losses = []
-    all_accuracy = []
     for epoch in range(1, epochs + 1):
         print('epoch started')
         if device.type == 'cuda':
@@ -400,7 +395,7 @@ def train_model(
                   'the images are loaded correctly.'
 
               images = images.to(device=device, dtype=torch.float32)
-              true_masks = true_masks.to(device=device, dtype=torch.long).unsqueeze(1)
+              true_masks = true_masks.to(device=device, dtype=torch.long)
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                   masks_pred = model(images)
@@ -408,7 +403,6 @@ def train_model(
                       loss = criterion(masks_pred.squeeze(1), true_masks.float())
                       loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
                   else:
-                      true_masks = torch.argmax(true_masks, dim=1)
                       print(f"masks_pred shape: {masks_pred.shape}, dtype: {masks_pred.dtype}")
                       print(f"true_masks shape: {true_masks.shape}, dtype: {true_masks.dtype}")
                       print(f"Unique values in true_masks: {torch.unique(true_masks)}")
@@ -427,25 +421,27 @@ def train_model(
 
               global_step += 1
               epoch_loss += loss.item()
-              all_epoch_losses.append(epoch_loss)
+              if device.type == 'cuda':
+                torch.cuda.empty_cache()
+                gc.collect()
 
               #LOG WANDB
               if wandb_active:
-                wandb.log({"train/train_loss": epoch_loss,
+                wandb.log({"train/train_loss": loss.item(),
                             "train/learning_rate": optimizer.param_groups[0]['lr'],
                             "train/epoch": epoch,
-                            "train/step": global_step,
                             })
+                print("IMAGE IS PRINTED!!!")
     
-    if epoch % 1 == 0:
-            if USE_WANDB:
-                fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
-                wandb.log({
-                    "train/plot": fig,
-            })
-    val_score = evaluate(model, val_loader, device, amp)
-    all_accuracy.append(val_score.item())
-    scheduler.step(val_score)
+        if epoch % 1 == 0:
+                if USE_WANDB:
+                    fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
+                    wandb.log({
+                        "train/plot": fig,
+                })
+        val_score = evaluate(model, val_loader, device, amp)
+        scheduler.step(val_score)
+        wandb.log({"val_acc": val_score})
 
 #LOGIN
 if USE_WANDB:
@@ -491,7 +487,7 @@ def run_model():
         train_model(model=model, device=device)
 
 if USE_WANDB:
-    wandb.agent(sweep_id, function=run_model, count=20)
+    wandb.agent(sweep_id, function=run_model, count=2)
 else:
     run_model()
 
