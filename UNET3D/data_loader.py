@@ -4,11 +4,18 @@ import nibabel as nib
 import numpy as np
 from pathlib import Path
 import torch.nn.functional as F
+from torchvision import transforms
 
 class BrainDataset(Dataset):
     def __init__(self, patient_ids: list, data_dir: Path):
         self.patient_ids = patient_ids
         self.data_dir = data_dir
+        self.transform = transform
+        self.add_noise = add_noise
+        self.noise_mean = noise_mean
+        self.noise_std = noise_std
+
+
 
     def load_nifti_file(self, file_path):
         return nib.load(file_path).get_fdata()
@@ -38,8 +45,26 @@ class BrainDataset(Dataset):
         #Normalize
         data = F.normalize(data, p=2, dim=0)
         
+        if self.transform:
+            data = self.transform(data)
+        
+        if self.add_noise:
+            data = self.add_weight_noise(data)
 
         return data, target, patient_id
+
+
+    def add_weight_noise(self, data):
+        if self.add_noise:
+            for tensor in data:
+                if len(tensor.size()) > 1:
+                    tensor.add_(torch.randn(tensor.size()) * self.noise_std + self.noise_mean)
+        return data
+
+data_paths = [...]
+data_transform = transforms.RandomRotation(degrees=(min_angle, max_angle)) #Define min and max angle for rotation
+dataset = BrainDataset(data_paths, transform = data_transform, add_noise = True, noise_mean = 0, noise_std = 1e-3)
+
 
 #Test loader    
 # patient_ids = ['BraTS2021_00495']
