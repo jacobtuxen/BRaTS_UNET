@@ -56,7 +56,6 @@ class Up(nn.Module):
 
     def forward(self, x1, x2):
         x1 = self.up(x1)
-        # input is CHW
         diffY = x2.size()[2] - x1.size()[2]
         diffX = x2.size()[3] - x1.size()[3]
         diffZ = x2.size()[4] - x1.size()[4]
@@ -67,7 +66,7 @@ class Up(nn.Module):
         # if you have padding issues, see
         # https://github.com/HaiyongJiang/U-Net-Pytorch-Unstructured-Buggy/commit/0e854509c2cea854e247a9c615f175f76fbb2e3a
         # https://github.com/xiaopeng-liao/Pytorch-UNet/commit/8ebac70e633bac59fc22bb5195e513d5832fb3bd
-        x = torch.cat([x2, x1], dim=1)
+        x = torch.cat([x2,x1], dim=1)
         return self.conv(x)
 
 
@@ -85,26 +84,27 @@ class OutConv(nn.Module):
 
 
 class UNet3D(nn.Module):
-    def __init__(self, n_channels, n_classes, trilinear=False):
+    def __init__(self, n_channels, n_classes, trilinear=False, scale_channels=1):
         super(UNet3D, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.trilinear = trilinear
 
-        self.inc = (DoubleConv(n_channels, 32))
-        self.down1 = (Down(32, 64))
-        self.down2 = (Down(64, 128))
-        self.down3 = (Down(128, 256))
+        self.inc = (DoubleConv(n_channels, 32//scale_channels))
+        self.down1 = (Down(32//scale_channels, 64//scale_channels))
+        self.down2 = (Down(64//scale_channels, 128//scale_channels))
+        self.down3 = (Down(128//scale_channels, 256//scale_channels))
         factor = 2 if trilinear else 1
-        self.up1 = (Up(256, 128 // factor, trilinear))
-        self.up2 = (Up(128, 64 // factor, trilinear))
-        self.up3 = (Up(64, 32, trilinear))
-        self.outc = (OutConv(32, n_classes))
+        self.up1 = (Up(256//scale_channels, (128//scale_channels) // factor, trilinear))
+        self.up2 = (Up(128//scale_channels, (64//scale_channels) // factor, trilinear))
+        self.up3 = (Up(64//scale_channels, (32//scale_channels) // factor, trilinear))
+        self.outc = (OutConv(32//scale_channels, n_classes))
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def forward(self, x):
         def print_memory_usage():
-            if self.device.type == 'cuda':
+            NO_PRINT = False
+            if self.device.type == 'cuda' and not NO_PRINT:
                 print(f'Current memory allocated: {torch.cuda.memory_allocated(self.device)/1024**3:.2f} GB')
                 print(f'Max memory allocated: {torch.cuda.max_memory_allocated(self.device)/1024**3:.2f} GB')
                 print(f'Current memory cached: {torch.cuda.memory_reserved(self.device)/1024**3:.2f} GB')
@@ -183,25 +183,26 @@ import matplotlib.pyplot as plt
 import nibabel as nib
 
 def visualize_model_output(epoch, input, model, patient_id, device):
-  slices = np.linspace(10,150, 5)
+  slices = np.linspace(10,100, 5)
   plot_titles = ['flair','t1', 't1ce', 't2','seg']
 
   model.eval()
   with torch.no_grad():
-    input = input.squeeze(0).to(device)
-    output = model(input)
+    input = input.unsqueeze(0).to(device)
+    output = model(input).cpu().numpy()
+    output = np.argmax(output, axis=1)
   
   fig, ax = plt.subplots(len(slices), 6, figsize=(15, 5))
-  originals = [nib.load(f'/work3/s211469/data/{patient_id}/{patient_id}_{titles}').get_fdata() for titles in ['flair.nii','t1.nii', 't1ce.nii', 't2.nii','seg.nii']]
+  originals = [nib.load(f'/work3/s194572/data/{patient_id}/{patient_id}_{titles}').get_fdata() for titles in ['flair.nii','t1.nii', 't1ce.nii', 't2.nii','seg.nii']]
   for idj, slice_ in enumerate(slices):
     for idx, original in enumerate(originals):
-      ax[idj, idx].imshow(original[:,:,slice_], cmap='gray')
+      ax[idj, idx].imshow(original[:,:,int(slice_)], cmap='gray')
       ax[idj, idx].axis('off')
       if idj == 0 and idx == 0:
         ax[0, idx].set_title(f'E: {epoch}, {plot_titles[idx]}')
       elif idj == 0:
         ax[0, idx].set_title(f'{plot_titles[idx]}')
-    ax[idj, 5].imshow(output[:,:,slice_], cmap='gray')
+    ax[idj, 5].imshow(output[0,:,:,int(slice_)], cmap='gray')
     ax[idj, 5].axis('off')
     if idj == 0:
       ax[0, 5].set_title(f'Prediction')
@@ -220,6 +221,7 @@ class BrainDataset(Dataset):
     def __init__(self, patient_ids: list, data_dir: Path):
         self.patient_ids = patient_ids
         self.data_dir = data_dir
+        self.extensions = ['flair.nii', 't1ce.nii', 't2.nii','seg.nii']
 
     def load_nifti_file(self, file_path):
         return nib.load(file_path).get_fdata()
@@ -229,32 +231,37 @@ class BrainDataset(Dataset):
     
     def __getitem__(self, idx):
         patient_id = self.patient_ids[idx]
-        data_paths = [self.data_dir / patient_id / f'{patient_id}_{data_id}' for data_id in ['flair.nii','t1.nii', 't1ce.nii', 't2.nii','seg.nii']]
+        data_paths = [self.data_dir / patient_id / f'{patient_id}_{data_id}' for data_id in self.extensions]
         data = [self.load_nifti_file(path) for path in data_paths]
-        target = torch.from_numpy(np.where(data[4]==4, 3, data[4])).long()
+        target = torch.from_numpy(np.where(data[-1]==4, 3, data[-1])).long()
         #Cat
-        data = torch.cat([torch.from_numpy(data[i]).unsqueeze(0) for i in range(4)], dim=0)
+        data = torch.cat([torch.from_numpy(data[i]).unsqueeze(0) for i in range(len(self.extensions)-1)], dim=0)
 
-        start_idx = (data.shape[1]-160)//2
-        end_idx = (data.shape[1]+160)//2
-
-        data = F.pad(data, (0, 160 - data.shape[3], 0, 0)) 
-        target = F.pad(target, (0, 160 - target.shape[2], 0, 0, 0, 0))
-
+        start_idx = 56
+        end_idx = 184
+        start_idx_height = 13
+        end_idx_height = 141
 
         
-        data = data[:,start_idx:end_idx,start_idx:end_idx,:]
-        target = target[start_idx:end_idx,start_idx:end_idx,:]
+        data = data[:,start_idx:end_idx,start_idx:end_idx,start_idx_height:end_idx_height]
+        target = target[start_idx:end_idx,start_idx:end_idx,start_idx_height:end_idx_height]
         
-        #Normalize
-        data = F.normalize(data, p=2, dim=0)
-        
+        #normalize data in each channel, and set between 0 and 1
+        # Normalize each channel independently
+        for i in range(data.shape[0]):  # Iterate over channels
+            channel = data[i, :, :, :]
+            mean = channel.mean()
+            std = channel.std()
+            # Normalize this channel
+            data[i, :, :, :] = (channel - mean) / std
+            # Optionally clamp values to [0, 1]
+            data[i, :, :, :] = torch.clamp(data[i, :, :, :], 0, 1)
 
         return data, target, patient_id
 
-#Test loader    
+# #Test loader    
 # patient_ids = ['BraTS2021_00495']
-# data_dir = Path.home() / 'Documents' / 'DTU' / 'E23' / '02456_Deep_Learning' / 'Brain_Project' / 'BRaTS_UNET' / 'data' / 'archive'
+# data_dir = Path.home() / 'Desktop' / 'Deep Learning' / 'BRaTS_UNET' / 'data' / 'archive'
 # dataset = BrainDataset(patient_ids, data_dir)
 # data, target,_ = dataset[0]
 # print(data.shape)
@@ -263,7 +270,6 @@ class BrainDataset(Dataset):
 # Content from: UNET3D/evaluate.py
 import torch
 import torch.nn.functional as F
-from tqdm import tqdm
 
 
 
@@ -275,7 +281,7 @@ def evaluate(net, dataloader, device, amp):
 
     # iterate over the validation set
     with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
-        for batch in tqdm(dataloader, total=num_val_batches, desc='Validation round', unit='batch', leave=False):
+        for batch in dataloader:
             image, mask_true = batch[0], batch[1]
 
             # move images and labels to correct device and type
@@ -314,13 +320,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
+import torchvision.ops as tvops
 import numpy as np
 from pathlib import Path
 from torch import optim
 from torch.utils.data import DataLoader, random_split
-from tqdm import tqdm
 from torch.utils.data import ConcatDataset
 from datetime import datetime
+import matplotlib.pyplot as plt
 import wandb
 import gc
 
@@ -344,8 +351,8 @@ def train_model(
     #setup wandb    
 
     # 1. Create dataset #Note this is for testing
-    data_dir = Path('/work3/s211469/data')
-    patient_ids = np.loadtxt(data_dir / 'filenames.txt', dtype=str)
+    data_dir = Path('/work3/s194572/data')
+    patient_ids = np.loadtxt(data_dir / 'filenames_filtered.txt', dtype=str)
     val_pct = 0.1
     val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
     training_ids = [id for id in patient_ids if id not in val_ids]
@@ -371,19 +378,15 @@ def train_model(
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    weights = torch.tensor([1.0, 18134.2673, 122.652088, 575.141447]).to(device)
-    criterion = nn.CrossEntropyLoss(weight=weights) if model.n_classes > 1 else nn.BCEWithLogitsLoss()
+    # weights = torch.tensor([1.01553413, 517.7032716, 98.72168775, 309.07898017]).to(device)
+    #criterion = nn.CrossEntropyLoss(weight=weights) <- legacy code maybe?
+
     global_step = 0
  
 
     # 5. Begin training
     for epoch in range(1, epochs + 1):
-        print('epoch started')
-        if device.type == 'cuda':
-            print(f'Current memory allocated: {torch.cuda.memory_allocated(device)/1024**3:.2f} GB')
-            print(f'Max memory allocated: {torch.cuda.max_memory_allocated(device)/1024**3:.2f} GB')
-            print(f'Current memory cached: {torch.cuda.memory_reserved(device)/1024**3:.2f} GB')
-            print(f'Max memory cached: {torch.cuda.max_memory_reserved(device)/1024**3:.2f} GB')
+        print(f'epoch {epoch} started')
         model.train()
         epoch_loss = 0
         for batch in train_loader:
@@ -398,20 +401,15 @@ def train_model(
               true_masks = true_masks.to(device=device, dtype=torch.long)
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
-                  masks_pred = model(images)
-                  if model.n_classes == 1:
-                      loss = criterion(masks_pred.squeeze(1), true_masks.float())
-                      loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
-                  else:
-                      print(f"masks_pred shape: {masks_pred.shape}, dtype: {masks_pred.dtype}")
-                      print(f"true_masks shape: {true_masks.shape}, dtype: {true_masks.dtype}")
-                      print(f"Unique values in true_masks: {torch.unique(true_masks)}")
-                      loss = criterion(masks_pred, true_masks)
-                      loss += dice_loss(
-                          F.softmax(masks_pred, dim=1).float(),
-                          F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(),
-                          multiclass=True
-                      )
+                masks_pred = model(images)
+                # loss = tvops.focal_loss.sigmoid_focal_loss(inputs=masks_pred, targets=F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(), gamma=2.0, alpha=0.25, reduction='mean')
+                if wandb_active:
+                    wandb.log({"train/focal_loss": loss.item()})
+                loss = dice_loss(
+                    F.softmax(masks_pred, dim=1).float(),
+                    F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(),
+                    multiclass=True
+                )
 
               optimizer.zero_grad(set_to_none=True)
               grad_scaler.scale(loss).backward()
@@ -427,22 +425,24 @@ def train_model(
 
               #LOG WANDB
               if wandb_active:
-                wandb.log({"train/train_loss": loss.item(),
-                            "train/learning_rate": optimizer.param_groups[0]['lr'],
-                            "train/epoch": epoch,
-                            })
-                print("IMAGE IS PRINTED!!!")
-    
-        if epoch % 1 == 0:
-                if USE_WANDB:
-                    fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
-                    wandb.log({
-                        "train/plot": fig,
-                })
+                wandb.log({"train/train_loss": loss.item()})
         val_score = evaluate(model, val_loader, device, amp)
         scheduler.step(val_score)
-        wandb.log({"val_acc": val_score})
-
+        
+        if wandb_active:
+            wandb.log({"val/val_accuracy": val_score})
+            wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
+            if epoch % 5 == 0:
+                fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
+                wandb.log({"train/plot": fig})
+                fig.clf()
+                plt.close(fig)
+                image_val, _, patient_ids_val = next(iter(val_loader))
+                image_val = image_val.to(device=device, dtype=torch.float32)
+                fig_val = visualize_model_output(epoch, image_val[0], model, patient_ids_val[0], device)
+                wandb.log({"val/plot": fig_val})
+                fig_val.clf()
+                plt.close(fig_val)
 #LOGIN
 if USE_WANDB:
     timestamp = datetime.now().strftime("%Y%d%m-%H%M%S")
@@ -452,20 +452,20 @@ if USE_WANDB:
         "name": "sweep",
         "metric": {"goal": "maximize", "name": "val/val_accuracy"},
         "parameters": {
-            "batch_size": {"values": [1,2,4]},
+            "batch_size": {"values": [2,4]},
             "lr": {"max": 1e-3, "min": 1e-6},
-            "epochs": {"values": [30,60,100]},
+            "epochs": {"values": [30]},
             "weight_decay": {"max": 1e-3, "min": 1e-6},
             "momentum": {"values": [0.9, 0.99]},
-            "amp": {"values": [True, False]},
-            "gradient_clipping": {"values": [0.1, 0.5, 1.0]},
+            "amp": {"values": [True]},
+            "gradient_clipping": {"values": [1.0]},
             "optimizer": {"values": ["RMSprop"]},
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
 
 def run_model():
-    model = UNet3D(n_channels=4, n_classes=4, trilinear=False)
+    model = UNet3D(n_channels=3, n_classes=4, trilinear=False, scale_channels=1)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device=device)
     if USE_WANDB:
@@ -487,7 +487,7 @@ def run_model():
         train_model(model=model, device=device)
 
 if USE_WANDB:
-    wandb.agent(sweep_id, function=run_model, count=2)
+    wandb.agent(sweep_id, function=run_model, count=10)
 else:
     run_model()
 

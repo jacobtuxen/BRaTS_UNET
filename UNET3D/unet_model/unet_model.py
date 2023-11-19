@@ -4,26 +4,27 @@ from .unet_parts import *
 
 
 class UNet3D(nn.Module):
-    def __init__(self, n_channels, n_classes, trilinear=False):
+    def __init__(self, n_channels, n_classes, trilinear=False, scale_channels=1):
         super(UNet3D, self).__init__()
         self.n_channels = n_channels
         self.n_classes = n_classes
         self.trilinear = trilinear
 
-        self.inc = (DoubleConv(n_channels, 32))
-        self.down1 = (Down(32, 64))
-        self.down2 = (Down(64, 128))
-        self.down3 = (Down(128, 256))
+        self.inc = (DoubleConv(n_channels, 32//scale_channels))
+        self.down1 = (Down(32//scale_channels, 64//scale_channels))
+        self.down2 = (Down(64//scale_channels, 128//scale_channels))
+        self.down3 = (Down(128//scale_channels, 256//scale_channels))
         factor = 2 if trilinear else 1
-        self.up1 = (Up(256, 128 // factor, trilinear))
-        self.up2 = (Up(128, 64 // factor, trilinear))
-        self.up3 = (Up(64, 32, trilinear))
-        self.outc = (OutConv(32, n_classes))
+        self.up1 = (Up(256//scale_channels, (128//scale_channels) // factor, trilinear))
+        self.up2 = (Up(128//scale_channels, (64//scale_channels) // factor, trilinear))
+        self.up3 = (Up(64//scale_channels, (32//scale_channels) // factor, trilinear))
+        self.outc = (OutConv(32//scale_channels, n_classes))
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     def forward(self, x):
         def print_memory_usage():
-            if self.device.type == 'cuda':
+            NO_PRINT = False
+            if self.device.type == 'cuda' and not NO_PRINT:
                 print(f'Current memory allocated: {torch.cuda.memory_allocated(self.device)/1024**3:.2f} GB')
                 print(f'Max memory allocated: {torch.cuda.max_memory_allocated(self.device)/1024**3:.2f} GB')
                 print(f'Current memory cached: {torch.cuda.memory_reserved(self.device)/1024**3:.2f} GB')

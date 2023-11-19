@@ -9,15 +9,16 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
+import torchvision.ops as tvops
 import numpy as np
 from pathlib import Path
 from torch import optim
 from torch.utils.data import DataLoader, random_split
-from tqdm import tqdm
 from torch.utils.data import ConcatDataset
 from datetime import datetime
 from evaluate import evaluate
 from unet_model.unet_model import UNet3D
+import matplotlib.pyplot as plt
 from utils.dice_score import dice_loss
 from UNET3D.visualize import visualize_model_output
 from UNET3D.data_loader import BrainDataset
@@ -44,8 +45,8 @@ def train_model(
     #setup wandb    
 
     # 1. Create dataset #Note this is for testing
-    data_dir = Path('/work3/s211469/data')
-    patient_ids = np.loadtxt(data_dir / 'filenames.txt', dtype=str)
+    data_dir = Path('/work3/s194572/data')
+    patient_ids = np.loadtxt(data_dir / 'filenames_filtered.txt', dtype=str)
     val_pct = 0.1
     val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
     training_ids = [id for id in patient_ids if id not in val_ids]
@@ -71,19 +72,15 @@ def train_model(
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    weights = torch.tensor([1.0, 18134.2673, 122.652088, 575.141447]).to(device)
-    criterion = nn.CrossEntropyLoss(weight=weights) if model.n_classes > 1 else nn.BCEWithLogitsLoss()
+    # weights = torch.tensor([1.01553413, 517.7032716, 98.72168775, 309.07898017]).to(device)
+    #criterion = nn.CrossEntropyLoss(weight=weights) <- legacy code maybe?
+
     global_step = 0
  
 
     # 5. Begin training
     for epoch in range(1, epochs + 1):
-        print('epoch started')
-        if device.type == 'cuda':
-            print(f'Current memory allocated: {torch.cuda.memory_allocated(device)/1024**3:.2f} GB')
-            print(f'Max memory allocated: {torch.cuda.max_memory_allocated(device)/1024**3:.2f} GB')
-            print(f'Current memory cached: {torch.cuda.memory_reserved(device)/1024**3:.2f} GB')
-            print(f'Max memory cached: {torch.cuda.max_memory_reserved(device)/1024**3:.2f} GB')
+        print(f'epoch {epoch} started')
         model.train()
         epoch_loss = 0
         for batch in train_loader:
@@ -98,20 +95,15 @@ def train_model(
               true_masks = true_masks.to(device=device, dtype=torch.long)
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
-                  masks_pred = model(images)
-                  if model.n_classes == 1:
-                      loss = criterion(masks_pred.squeeze(1), true_masks.float())
-                      loss += dice_loss(F.sigmoid(masks_pred.squeeze(1)), true_masks.float(), multiclass=False)
-                  else:
-                      print(f"masks_pred shape: {masks_pred.shape}, dtype: {masks_pred.dtype}")
-                      print(f"true_masks shape: {true_masks.shape}, dtype: {true_masks.dtype}")
-                      print(f"Unique values in true_masks: {torch.unique(true_masks)}")
-                      loss = criterion(masks_pred, true_masks)
-                      loss += dice_loss(
-                          F.softmax(masks_pred, dim=1).float(),
-                          F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(),
-                          multiclass=True
-                      )
+                masks_pred = model(images)
+                loss = tvops.focal_loss.sigmoid_focal_loss(inputs=masks_pred, targets=F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(), gamma=2.0, alpha=0.25, reduction='mean')
+                if wandb_active:
+                    wandb.log({"train/focal_loss": loss.item()})
+                loss += dice_loss(
+                    F.softmax(masks_pred, dim=1).float(),
+                    F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(),
+                    multiclass=True
+                )
 
               optimizer.zero_grad(set_to_none=True)
               grad_scaler.scale(loss).backward()
@@ -127,22 +119,24 @@ def train_model(
 
               #LOG WANDB
               if wandb_active:
-                wandb.log({"train/train_loss": loss.item(),
-                            "train/learning_rate": optimizer.param_groups[0]['lr'],
-                            "train/epoch": epoch,
-                            })
-                print("IMAGE IS PRINTED!!!")
-    
-        if epoch % 1 == 0:
-                if USE_WANDB:
-                    fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
-                    wandb.log({
-                        "train/plot": fig,
-                })
+                wandb.log({"train/train_loss": loss.item()})
         val_score = evaluate(model, val_loader, device, amp)
         scheduler.step(val_score)
-        wandb.log({"val_acc": val_score})
-
+        
+        if wandb_active:
+            wandb.log({"val/val_accuracy": val_score})
+            wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
+            if epoch % 5 == 0:
+                fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
+                wandb.log({"train/plot": fig})
+                fig.clf()
+                plt.close(fig)
+                image_val, _, patient_ids_val = next(iter(val_loader))
+                image_val = image_val.to(device=device, dtype=torch.float32)
+                fig_val = visualize_model_output(epoch, image_val[0], model, patient_ids_val[0], device)
+                wandb.log({"val/plot": fig_val})
+                fig_val.clf()
+                plt.close(fig_val)
 #LOGIN
 if USE_WANDB:
     timestamp = datetime.now().strftime("%Y%d%m-%H%M%S")
@@ -152,20 +146,20 @@ if USE_WANDB:
         "name": "sweep",
         "metric": {"goal": "maximize", "name": "val/val_accuracy"},
         "parameters": {
-            "batch_size": {"values": [1,2,4]},
+            "batch_size": {"values": [2,4]},
             "lr": {"max": 1e-3, "min": 1e-6},
-            "epochs": {"values": [30,60,100]},
+            "epochs": {"values": [30]},
             "weight_decay": {"max": 1e-3, "min": 1e-6},
             "momentum": {"values": [0.9, 0.99]},
-            "amp": {"values": [True, False]},
-            "gradient_clipping": {"values": [0.1, 0.5, 1.0]},
+            "amp": {"values": [True]},
+            "gradient_clipping": {"values": [1.0]},
             "optimizer": {"values": ["RMSprop"]},
         }
     }
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
 
 def run_model():
-    model = UNet3D(n_channels=4, n_classes=4, trilinear=False)
+    model = UNet3D(n_channels=3, n_classes=4, trilinear=False, scale_channels=1)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device=device)
     if USE_WANDB:
@@ -187,7 +181,7 @@ def run_model():
         train_model(model=model, device=device)
 
 if USE_WANDB:
-    wandb.agent(sweep_id, function=run_model, count=2)
+    wandb.agent(sweep_id, function=run_model, count=10)
 else:
     run_model()
 
