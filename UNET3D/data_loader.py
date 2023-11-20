@@ -10,12 +10,8 @@ class BrainDataset(Dataset):
     def __init__(self, patient_ids: list, data_dir: Path):
         self.patient_ids = patient_ids
         self.data_dir = data_dir
-        self.transform = transform
-        self.add_noise = add_noise
-        self.noise_mean = noise_mean
-        self.noise_std = noise_std
-
-
+        self.transform = False
+        self.add_noise = False
 
     def load_nifti_file(self, file_path):
         return nib.load(file_path).get_fdata()
@@ -36,8 +32,6 @@ class BrainDataset(Dataset):
 
         data = F.pad(data, (0, 160 - data.shape[3], 0, 0)) 
         target = F.pad(target, (0, 160 - target.shape[2], 0, 0, 0, 0))
-
-
         
         data = data[:,start_idx:end_idx,start_idx:end_idx,:]
         target = target[start_idx:end_idx,start_idx:end_idx,:]
@@ -46,25 +40,26 @@ class BrainDataset(Dataset):
         data = F.normalize(data, p=2, dim=0)
         
         if self.transform:
-            data = self.transform(data)
-        
+            data = self.data_transform(data)
+
         if self.add_noise:
             data = self.add_weight_noise(data)
-
+        
         return data, target, patient_id
-
-
-    def add_weight_noise(self, data):
-        if self.add_noise:
-            for tensor in data:
-                if len(tensor.size()) > 1:
-                    tensor.add_(torch.randn(tensor.size()) * self.noise_std + self.noise_mean)
+    
+    def data_transform(self, data):
+        #rotate 3d input image
+        data = torch.rot90(data, k=np.random.randint(1,4), dims=(1,2))
+        #flip 3d input image
+        if np.random.randint(1,4):
+            data = torch.flip(data, dims=(1,2))
         return data
-
-data_paths = [...]
-data_transform = transforms.RandomRotation(degrees=(min_angle, max_angle)) #Define min and max angle for rotation
-dataset = BrainDataset(data_paths, transform = data_transform, add_noise = True, noise_mean = 0, noise_std = 1e-3)
-
+    
+    #add random noise to data input
+    def add_weight_noise(self, data):
+        sigma = 25.0
+        noise = sigma * torch.randn_like(data)
+        return data + noise
 
 #Test loader    
 # patient_ids = ['BraTS2021_00495']
