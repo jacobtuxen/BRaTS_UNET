@@ -43,7 +43,7 @@ class BrainDataset(Dataset):
             # Normalize this channel
             data[i, :, :, :] = (channel - mean) / std
             # Optionally clamp values to [0, 1]
-            data[i, :, :, :] = torch.clamp(data[i, :, :, :], 0, 1)
+            # data[i, :, :, :] = torch.clamp(data[i, :, :, :], 0, 1)
 
         return data, target, patient_id
 
