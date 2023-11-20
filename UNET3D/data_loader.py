@@ -34,16 +34,8 @@ class BrainDataset(Dataset):
         data = data[:,start_idx:end_idx,start_idx:end_idx,start_idx_height:end_idx_height]
         target = target[start_idx:end_idx,start_idx:end_idx,start_idx_height:end_idx_height]
         
-        #normalize data in each channel, and set between 0 and 1
-        # Normalize each channel independently
-        for i in range(data.shape[0]):  # Iterate over channels
-            channel = data[i, :, :, :]
-            mean = channel.mean()
-            std = channel.std()
-            # Normalize this channel
-            data[i, :, :, :] = (channel - mean) / std
-            # Optionally clamp values to [0, 1]
-            # data[i, :, :, :] = torch.clamp(data[i, :, :, :], 0, 1)
+        #normalize data in each channel min max normalization
+        data = data - data.min() / (data.max() - data.min())
 
         return data, target, patient_id
 
