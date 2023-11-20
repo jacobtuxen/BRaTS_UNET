@@ -10,14 +10,14 @@ class UNet3D(nn.Module):
         self.n_classes = n_classes
         self.trilinear = trilinear
 
-        self.inc = (DoubleConv(n_channels, 32//scale_channels))
-        self.down1 = (Down(32//scale_channels, 64//scale_channels))
-        self.down2 = (Down(64//scale_channels, 128//scale_channels))
-        self.down3 = (Down(128//scale_channels, 256//scale_channels))
+        self.inc = (DoubleConv(n_channels, 32//scale_channels, dropout=0.1))
+        self.down1 = (Down(32//scale_channels, 64//scale_channels, dropout=0.1))
+        self.down2 = (Down(64//scale_channels, 128//scale_channels, dropout=0.2))
+        self.down3 = (Down(128//scale_channels, 256//scale_channels, dropout=0.3))
         factor = 2 if trilinear else 1
-        self.up1 = (Up(256//scale_channels, (128//scale_channels) // factor, trilinear))
-        self.up2 = (Up(128//scale_channels, (64//scale_channels) // factor, trilinear))
-        self.up3 = (Up(64//scale_channels, (32//scale_channels) // factor, trilinear))
+        self.up1 = (Up(256//scale_channels, (128//scale_channels) // factor, trilinear, dropout=0.1))
+        self.up2 = (Up(128//scale_channels, (64//scale_channels) // factor, trilinear, dropout=0.2))
+        self.up3 = (Up(64//scale_channels, (32//scale_channels) // factor, trilinear, dropout=0.3))
         self.outc = (OutConv(32//scale_channels, n_classes))
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

@@ -11,7 +11,7 @@ def visualize_model_output(epoch, input, model, patient_id, device):
   with torch.no_grad():
     input = input.unsqueeze(0).to(device)
     output = model(input).cpu().numpy()
-    output = np.argmax(output, axis=1)
+    output = np.argmax(output, axis=1) #<- #0 air
     input_images = input.cpu().numpy()
 
   input_images = np.squeeze(input_images, axis=0)

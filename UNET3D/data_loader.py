@@ -35,7 +35,7 @@ class BrainDataset(Dataset):
         target = target[start_idx:end_idx,start_idx:end_idx,start_idx_height:end_idx_height]
         
         #normalize data in each channel min max normalization
-        data = data - data.min() / (data.max() - data.min())
+        data = data - data.min() / (1e-5 + (data.max() - data.min())) 
 
         return data, target, patient_id
 
