@@ -23,7 +23,7 @@ for i in range(len(extensions)):
         else:
             img = ax[i].imshow(data[i][:, :, slice_idx], cmap='bone')
             if i == 0:
-                cbar = plt.colorbar(img, ax=ax[i], pad = 0.05, , location='left')
+                cbar = plt.colorbar(img, ax=ax[i], pad = 0.05, location='left')
         ax[i].set_xticks([])
         ax[i].set_yticks([])
         ax[i].set_title(f'{modality_names[i]}')
