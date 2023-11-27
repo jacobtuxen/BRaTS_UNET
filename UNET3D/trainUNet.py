@@ -21,7 +21,7 @@ from unet_model.unet_model import UNet3D
 from monai.losses import *
 import matplotlib.pyplot as plt
 # from utils.dice_score import dice_loss
-from UNET3D.visualize import visualize_model_output
+from UNET3D.plot import predictions_plot
 from UNET3D.data_loader import BrainDataset
 import wandb
 import gc
@@ -137,7 +137,7 @@ def train_model(
             images = images.to(device=device, dtype=torch.float32)
             true_masks = true_masks.to(device=device, dtype=torch.long)
             masks_pred = model(images)
-            loss = val_criterion(masks_pred, true_masks.unsqueeze(1))
+            #loss = val_criterion(masks_pred, true_masks.unsqueeze(1))
             val_score += 1 - loss.item()
         val_score = val_score/len(val_loader)
         model.train()
@@ -146,13 +146,26 @@ def train_model(
             wandb.log({"val/val_accuracy": val_score})
             wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
             if epoch % 2 == 0:
-                fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
+                
+                mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+                mask_pred = model(images.to(device=device, dtype=torch.float32))
+                mask_pred_train = np.argmax(mask_pred.detach().cpu().numpy(), axis=1)
+                mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+                img_train = images[0][0]
+                patient_id = patient_ids[0]
+                fig = predictions_plot(img_train, mask_true_train, mask_pred_train, patient_id=patient_id)
                 wandb.log({"train/plot": fig})
                 fig.clf()
                 plt.close(fig)
-                image_val, _, patient_ids_val = next(iter(val_loader))
-                image_val = image_val.to(device=device, dtype=torch.float32)
-                fig_val = visualize_model_output(epoch, image_val[0], model, patient_ids_val[0], device)
+                
+                image_val, true_masks_val, patient_ids_val = next(iter(val_loader))
+                mask_true_val = F.one_hot(true_masks_val[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+                mask_pred_val = model(image_val.to(device=device, dtype=torch.float32))
+                mask_pred_val = np.argmax(mask_pred_val.detach().cpu().numpy(), axis=1)
+                mask_pred_val = F.one_hot(torch.from_numpy(mask_pred_val[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+                img_val = image_val[0][0]
+                patient_id_val = patient_ids_val[0]
+                fig_val = predictions_plot(img_val, mask_true_val, mask_pred_val, patient_id=patient_id_val)
                 wandb.log({"val/plot": fig_val})
                 fig_val.clf()
                 plt.close(fig_val)
