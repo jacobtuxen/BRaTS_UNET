@@ -309,6 +309,106 @@ def focal_loss(alpha: Optional[Sequence] = None,
         ignore_index=ignore_index)
     return fl
 
+# Content from: UNET3D/plot.py
+import nibabel as nib
+from pathlib import Path
+import torch
+import numpy as np
+from torch.nn.functional import one_hot
+from skimage.util import montage
+import matplotlib.pyplot as plt
+import sys
+# sys.path.append('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET')
+import torch.nn.functional as F
+from matplotlib.lines import Line2D
+
+def predictions_plot(image, mask_true, mask_pred, patient_id='BraTS2021_00495'):
+    #Args:
+    #mask_true: true binary mask is a tensor of size (1, 2, 128,128,128)
+    #mask_pred: predicted binary mask is a tensor of size (1, 2, 128,128,128)
+    #image: is a flair data tensor of size (128,128,128)
+    #patient_id: is a string of the patient id
+    assert len(mask_true.shape) == 5
+    assert len(mask_pred.shape) == 5
+    assert len(image.shape) == 3
+
+    img_tensor = image.detach().numpy()
+    mask_true_tensor = mask_true.squeeze()[1].squeeze().cpu().detach().numpy()
+    mask_pred_tensor = mask_pred.squeeze()[1].squeeze().cpu().detach().numpy()
+
+    #Pad zeros to size 160x160x160
+    img_tensor = np.pad(img_tensor, ((16,16),(16,16),(16,16)), 'constant', constant_values=0)
+    mask_true_tensor = np.pad(mask_true_tensor, ((16,16),(16,16),(16,16)), 'constant', constant_values=0)
+    mask_pred_tensor = np.pad(mask_pred_tensor, ((16,16),(16,16),(16,16)), 'constant', constant_values=0)
+    
+
+    image = np.rot90(montage(img_tensor))
+    mask_true = np.rot90(montage(mask_true_tensor))
+    mask_pred = np.rot90(montage(mask_pred_tensor))
+
+
+    intersection = np.logical_and(mask_true, mask_pred)
+    fig, ax = plt.subplots(1, 1, figsize = (8, 8))
+    plt.subplot(1,1,1)
+    ax.imshow(image, cmap ='bone')
+    ax.imshow(np.ma.masked_where(mask_true == False, mask_true),
+                cmap='cool', alpha=0.9)
+    ax.imshow(np.ma.masked_where(mask_pred == False, mask_pred),
+                cmap='spring', alpha=0.6)
+    ax.imshow(np.ma.masked_where(intersection == False, intersection),
+                cmap='winter', alpha=1)
+    plt.suptitle(f'Error plot patient: {patient_id}')
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.legend(handles=[Line2D([0], [0], color='pink', lw=4, label='True'),
+                       Line2D([0], [0], color='yellow', lw=4, label='Predicted'),
+                       Line2D([0], [0], color='blue', lw=4, label='Intersection')], loc = 'lower center', bbox_to_anchor=(0.5, -0.125), frameon=False)
+    return fig
+
+# #Testing data,label,test_label is size 
+# data = torch.load('data.pt')
+# label = torch.load('label.pt')
+# test_label = torch.load('test_label.pt')
+# print(f'raw shapes: data: {data.shape}, label: {label.shape}, test_label: {test_label.shape}')
+
+# temp_label = label[:,1:4,:,:,:]
+# sum_label = torch.sum(temp_label, dim=1).unsqueeze(1)
+# mask_true = torch.cat([label[:,0,:,:,:].unsqueeze(1), sum_label], dim=1)
+
+# temp_label = test_label[:,1:4,:,:,:]
+# sum_label = torch.sum(temp_label, dim=1).unsqueeze(1)
+# mask_pred = torch.cat([test_label[:,0,:,:,:].unsqueeze(1), sum_label], dim=1)
+
+# image = data.squeeze()[0]
+
+# print(f'plotting shapes: {image.shape}, mask_true: {mask_true.shape}, mask_pred: {mask_pred.shape}')
+# #Input shapes are image: [128, 128, 128]), mask_true:[1, 2, 128, 128, 128], mask_pred: [1, 2, 128, 128, 128]
+# fig = predictions_plot(image, mask_true, mask_pred)
+
+# plt.show()
+
+# model = UNet3D(n_channels=3, n_classes=2, trilinear=False, scale_channels=1)
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# model = model.to(device=device)
+# print('loading model')
+# #Test loader    
+# patient_ids = ['BraTS2021_00495']
+# data_dir = Path(str('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET/data/archive'))
+# dataset = BrainDataset(patient_ids, data_dir, binary=True)
+# train_loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
+# print('loading data')
+# for batch in train_loader:
+#     images, true_masks, patient_ids = batch
+#     mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+#     mask_pred = model(images.to(device=device, dtype=torch.float32))
+#     mask_pred_train = np.argmax(mask_pred.detach().cpu().numpy(), axis=1)
+#     mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+#     img_train = images[0][0]
+#     patient_id = patient_ids[0]
+#     fig = predictions_plot(img_train, mask_true_train, mask_pred_train, patient_id=patient_id)
+#     plt.show()
+#     break
+
 # Content from: UNET3D/utils/generalized_dice.py
 import torch
 import torch.nn as nn
@@ -387,6 +487,7 @@ import torch
 import numpy as np
 import matplotlib.pyplot as plt
 import nibabel as nib
+from skimage.util import montage
 
 def visualize_model_output(epoch, input, model, patient_id, device):
   slices = np.linspace(10,100, 5)
@@ -431,6 +532,46 @@ def visualize_model_output(epoch, input, model, patient_id, device):
   model.train()
   return fig
 
+def predictions_plot(image, mask_true, mask_pred, patient_id='BraTS2021_00495'):
+    #Args:
+    #mask_true: true binary mask is a tensor of size (1, 2, 128,128,128)
+    #mask_pred: predicted binary mask is a tensor of size (1, 2, 128,128,128)
+    #image: is a flair data tensor of size (128,128,128)
+    #patient_id: is a string of the patient id
+    assert len(mask_true.shape) == 5
+    assert len(mask_pred.shape) == 5
+    assert len(image.shape) == 3
+
+    img_tensor = image.detach().numpy()
+    mask_true_tensor = mask_true.squeeze()[1].squeeze().cpu().detach().numpy()
+    mask_pred_tensor = mask_pred.squeeze()[1].squeeze().cpu().detach().numpy()
+
+    #Pad zeros to size 160x160x160
+    img_tensor = np.pad(img_tensor, ((16,16),(16,16),(16,16)), 'constant', constant_values=0)
+    mask_true_tensor = np.pad(mask_true_tensor, ((16,16),(16,16),(16,16)), 'constant', constant_values=0)
+    mask_pred_tensor = np.pad(mask_pred_tensor, ((16,16),(16,16),(16,16)), 'constant', constant_values=0)
+    
+
+    image = np.rot90(montage(img_tensor))
+    mask_true = np.rot90(montage(mask_true_tensor))
+    mask_pred = np.rot90(montage(mask_pred_tensor))
+
+
+    intersection = np.logical_and(mask_true, mask_pred)
+    fig, ax = plt.subplots(1, 1, figsize = (8, 8))
+    plt.subplot(1,1,1)
+    ax.imshow(image, cmap ='bone')
+    ax.imshow(np.ma.masked_where(mask_true == False, mask_true),
+                cmap='cool', alpha=0.9)
+    ax.imshow(np.ma.masked_where(mask_pred == False, mask_pred),
+                cmap='spring', alpha=0.6)
+    ax.imshow(np.ma.masked_where(intersection == False, intersection),
+                cmap='winter', alpha=1)
+    plt.suptitle(f'Error plot patient: {patient_id}')
+    return fig
+
+
+
 # Content from: UNET3D/class_distributions.py
 import torch
 import numpy as np
@@ -471,9 +612,10 @@ from pathlib import Path
 import torch.nn.functional as F
 
 class BrainDataset(Dataset):
-    def __init__(self, patient_ids: list, data_dir: Path):
+    def __init__(self, patient_ids: list, data_dir: Path, binary='WT'): #(WT, TC, ET)
         self.patient_ids = patient_ids
         self.data_dir = data_dir
+        self.binary = binary
         self.extensions = ['flair.nii', 't1ce.nii', 't2.nii','seg.nii']
 
     def load_nifti_file(self, file_path):
@@ -487,18 +629,25 @@ class BrainDataset(Dataset):
         data_paths = [self.data_dir / patient_id / f'{patient_id}_{data_id}' for data_id in self.extensions]
         data = [self.load_nifti_file(path) for path in data_paths]
         target = torch.from_numpy(np.where(data[-1]==4, 3, data[-1])).long()
-        #Cat
+        if self.binary == 'WT':
+            target = torch.where(target==0, 0, 1)
+        elif self.binary == 'MT':
+            target = torch.where(target==3, 1, target)
+            target = torch.where(target==2, 0, target)
+        elif self.binary == 'TC':
+            target = torch.where(target==1, 1, 0)
+        else:
+            raise ValueError('binary must be one of: WT, MT, TC')
         data = torch.cat([torch.from_numpy(data[i]).unsqueeze(0) for i in range(len(self.extensions)-1)], dim=0)
 
         start_idx = 56
         end_idx = 184
         start_idx_height = 13
         end_idx_height = 141
-
         
         data = data[:,start_idx:end_idx,start_idx:end_idx,start_idx_height:end_idx_height]
         target = target[start_idx:end_idx,start_idx:end_idx,start_idx_height:end_idx_height]
-        
+
         #normalize data in each channel min max normalization
         data = data - data.min() / (1e-5 + (data.max() - data.min())) 
 
@@ -507,22 +656,32 @@ class BrainDataset(Dataset):
 # #Test loader    
 # patient_ids = ['BraTS2021_00495']
 # data_dir = Path.home() / 'Desktop' / 'Deep Learning' / 'BRaTS_UNET' / 'data' / 'archive'
-# dataset = BrainDataset(patient_ids, data_dir)
+# dataset = BrainDataset(patient_ids, data_dir, binary='TC')
 # data, target,_ = dataset[0]
 # print(data.shape)
 # print(target.shape)
+# #visualize target
+# import matplotlib.pyplot as plt
+# plt.imshow(target[:,:,70])
+# plt.show()
 
 # Content from: UNET3D/evaluate.py
 import torch
 import torch.nn.functional as F
-
-
+from monai.losses import *
+from torchmetrics import JaccardIndex, ConfusionMatrix
+from torchmetrics import Dice as DiceMetric
 
 @torch.inference_mode()
 def evaluate(net, dataloader, device, amp):
     net.eval()
+    jaccard = JaccardIndex(task="binary" ,num_classes=net.n_classes)
+    dice = DiceMetric(num_classes=net.n_classes)
+    confusionmat = ConfusionMatrix(num_classes=net.n_classes)
     num_val_batches = len(dataloader)
     dice_score = 0
+    jaccard_score = 0
+    confusion = torch.zeros(net.n_classes, net.n_classes)
 
     # iterate over the validation set
     with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
@@ -533,25 +692,17 @@ def evaluate(net, dataloader, device, amp):
             image = image.to(device=device, dtype=torch.float32)
             mask_true = mask_true.to(device=device, dtype=torch.long)
 
-
             # predict the mask
             mask_pred = net(image)
-
-            if net.n_classes == 1:
-                assert mask_true.min() >= 0 and mask_true.max() <= 1, 'True mask indices should be in [0, 1]'
-                mask_pred = (F.sigmoid(mask_pred) > 0.5).float()
-                # compute the Dice score
-                dice_score += dice_coeff(mask_pred, mask_true, reduce_batch_first=False)
-            else:
-                assert mask_true.min() >= 0 and mask_true.max() < net.n_classes, 'True mask indices should be in [0, n_classes['
-                # convert to one-hot format
-                mask_true = F.one_hot(mask_true, net.n_classes).permute(0, 4, 1, 2, 3).float()
-                mask_pred = F.one_hot(mask_pred.argmax(dim=1), net.n_classes).permute(0, 4, 1, 2, 3).float()
-                # compute the Dice score, ignoring background
-                dice_score += multiclass_dice_coeff(mask_pred[:, 1:], mask_true[:, 1:], reduce_batch_first=False)
+            # mask_true = F.one_hot(mask_true, net.n_classes).permute(0, 4, 1, 2, 3).float()
+            mask_pred = F.one_hot(mask_pred.argmax(dim=1), net.n_classes).permute(0, 4, 1, 2, 3).float()
+            # compute the Dice score, ignoring background
+            jaccard_score += jaccard(mask_pred, mask_true)
+            dice_score = dice(mask_true, mask_true)
+            confusion += confusionmat(mask_pred, mask_true)
 
     net.train()
-    return dice_score / max(num_val_batches, 1)
+    return dice_score / max(num_val_batches, 1), jaccard_score / max(num_val_batches, 1), confusion
 
 # Content from: UNET3D/trainUNet.py
 
@@ -572,13 +723,14 @@ from torch import optim
 from torch.utils.data import DataLoader, random_split
 from torch.utils.data import ConcatDataset
 from datetime import datetime
+from monai.losses import *
 import matplotlib.pyplot as plt
-from monai.losses import GeneralizedDiceLoss, GeneralizedDiceFocalLoss
+from UNET3D.plot import predictions_plot
 import wandb
 import gc
 
 WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
-USE_WANDB = True
+USE_WANDB = False
 
 def train_model(
         model,
@@ -597,38 +749,26 @@ def train_model(
     #setup wandb    
 
     # 1. Create dataset #Note this is for testing
-    data_dir = Path('/work3/s211469/data')
+    data_dir = Path('/work3/s194572/data')
     patient_ids = np.loadtxt(data_dir / 'filenames.txt', dtype=str)
     val_pct = 0.1
     val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
     training_ids = [id for id in patient_ids if id not in val_ids]
 
     # 1. Create dataset and validation set
-    train_set = BrainDataset(patient_ids=training_ids, data_dir=data_dir)
-    val_set = BrainDataset(patient_ids=val_ids, data_dir=data_dir)
+    train_set = BrainDataset(patient_ids=training_ids, data_dir=data_dir, binary='WT')
+    val_set = BrainDataset(patient_ids=val_ids, data_dir=data_dir, binary='WT')
 
     # 3. Create data loaders set numworkers=4 as requested on HPC for faster data loading
     loader_args = dict(batch_size=batch_size, num_workers=4)
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
-
-    # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
-    match optimizer:
-        case "Adam":
-            optimizer = optim.Adam(model.parameters(),
-                                    lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.999))
-        case "RMSprop":
-            optimizer = optim.RMSprop(model.parameters(),lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
-        case "SGD":
-            optimizer = optim.SGD(model.parameters(),lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
+    
+    optimizer = optim.Adam(model.parameters(),lr=1e-4)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    # weights = torch.tensor([1.01553413, 517.7032716, 98.72168775, 309.07898017]).to(device)
-    #criterion = nn.CrossEntropyLoss(weight=weights) <- legacy code maybe?
-    criterion = GeneralizedDiceFocalLoss(to_onehot_y = True, softmax = True)
-    val_criterion = GeneralizedDiceLoss(to_onehot_y = True, softmax = True)
-    
+    criterion = GeneralizedDiceFocalLoss(softmax=True, gamma=2.0)
     global_step = 0
  
 
@@ -650,17 +790,10 @@ def train_model(
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                 masks_pred = model(images)
-                loss = criterion(masks_pred, true_masks.unsqueeze(1)) #Input must be (N, C, H, W, D)
-
-
-                # loss = tvops.focal_loss.sigmoid_focal_loss(inputs=masks_pred, targets=F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(), gamma=2.0, alpha=0.25, reduction='mean')
-                # if wandb_active:
-                #     wandb.log({"train/focal_loss": loss.item()})
-                # loss += dice_loss(
-                #     F.softmax(masks_pred, dim=1).float(),
-                #     F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(),
-                #     multiclass=True
-                # )
+                # loss = criterion(masks_pred, true_masks)
+                loss = criterion(masks_pred, F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float())
+                if wandb_active:
+                    wandb.log({"train/train_loss": loss.item()})
 
               optimizer.zero_grad(set_to_none=True)
               grad_scaler.scale(loss).backward()
@@ -679,33 +812,34 @@ def train_model(
                 wandb.log({"train/train_loss": loss.item()})
         
         # 6. Evaluate the model on the validation set
-        model.eval()
-        val_score = 0
-        for val_batch in val_loader:
-            images, true_masks, patient_ids = val_batch
-            images = images.to(device=device, dtype=torch.float32)
-            true_masks = true_masks.to(device=device, dtype=torch.long)
-            masks_pred = model(images)
-            loss = val_criterion(masks_pred, true_masks.unsqueeze(1))
-            val_score += 1 - loss.item()
-        val_score = val_score/len(val_loader)
-        model.train()
-        scheduler.step(val_score)
-
-        # val_score = evaluate(model, val_loader, device, amp)
-        # scheduler.step(val_score)
-        
+        val_score_dice, val_score_jaccard, confusion = evaluate(model, val_loader, device, amp)
+        scheduler.step(val_score_dice)
         if wandb_active:
-            wandb.log({"val/val_accuracy": val_score})
+            wandb.log({"val/val_accuracy_dice": val_score_dice})
+            wandb.log({"val/val_accuarce_jaccard:": val_score_jaccard})
             wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
-            if epoch % 5 == 0:
-                fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
+            print(f"confusion: {confusion}, at epoch {epoch}")
+            if epoch % 2 == 0:
+                
+                mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+                mask_pred = model(images.to(device=device, dtype=torch.float32))
+                mask_pred_train = np.argmax(mask_pred.detach().cpu().numpy(), axis=1)
+                mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+                img_train = images[0][0]
+                patient_id = patient_ids[0]
+                fig = predictions_plot(img_train, mask_true_train, mask_pred_train, patient_id=patient_id)
                 wandb.log({"train/plot": fig})
                 fig.clf()
                 plt.close(fig)
-                image_val, _, patient_ids_val = next(iter(val_loader))
-                image_val = image_val.to(device=device, dtype=torch.float32)
-                fig_val = visualize_model_output(epoch, image_val[0], model, patient_ids_val[0], device)
+                
+                image_val, true_masks_val, patient_ids_val = next(iter(val_loader))
+                mask_true_val = F.one_hot(true_masks_val[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+                mask_pred_val = model(image_val.to(device=device, dtype=torch.float32))
+                mask_pred_val = np.argmax(mask_pred_val.detach().cpu().numpy(), axis=1)
+                mask_pred_val = F.one_hot(torch.from_numpy(mask_pred_val[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+                img_val = image_val[0][0]
+                patient_id_val = patient_ids_val[0]
+                fig_val = predictions_plot(img_val, mask_true_val, mask_pred_val, patient_id=patient_id_val)
                 wandb.log({"val/plot": fig_val})
                 fig_val.clf()
                 plt.close(fig_val)
@@ -728,10 +862,10 @@ if USE_WANDB:
             "optimizer": {"values": ["Adam"]},
         }
     }
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_focal_GDL_{timestamp}")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{timestamp}")
 
 def run_model():
-    model = UNet3D(n_channels=3, n_classes=4, trilinear=False, scale_channels=1)
+    model = UNet3D(n_channels=3, n_classes=2, trilinear=False, scale_channels=1)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device=device)
     if USE_WANDB:

@@ -6,7 +6,7 @@ from torch.nn.functional import one_hot
 from skimage.util import montage
 import matplotlib.pyplot as plt
 import sys
-sys.path.append('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET')
+# sys.path.append('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET')
 from UNET3D.data_loader import BrainDataset
 from unet_model.unet_model import UNet3D
 import torch.nn.functional as F
@@ -77,24 +77,24 @@ def predictions_plot(image, mask_true, mask_pred, patient_id='BraTS2021_00495'):
 
 # plt.show()
 
-model = UNet3D(n_channels=3, n_classes=2, trilinear=False, scale_channels=1)
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = model.to(device=device)
-print('loading model')
-#Test loader    
-patient_ids = ['BraTS2021_00495']
-data_dir = Path(str('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET/data/archive'))
-dataset = BrainDataset(patient_ids, data_dir, binary=True)
-train_loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
-print('loading data')
-for batch in train_loader:
-    images, true_masks, patient_ids = batch
-    mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
-    mask_pred = model(images.to(device=device, dtype=torch.float32))
-    mask_pred_train = np.argmax(mask_pred.detach().cpu().numpy(), axis=1)
-    mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
-    img_train = images[0][0]
-    patient_id = patient_ids[0]
-    fig = predictions_plot(img_train, mask_true_train, mask_pred_train, patient_id=patient_id)
-    plt.show()
-    break
+# model = UNet3D(n_channels=3, n_classes=2, trilinear=False, scale_channels=1)
+# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+# model = model.to(device=device)
+# print('loading model')
+# #Test loader    
+# patient_ids = ['BraTS2021_00495']
+# data_dir = Path(str('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET/data/archive'))
+# dataset = BrainDataset(patient_ids, data_dir, binary=True)
+# train_loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
+# print('loading data')
+# for batch in train_loader:
+#     images, true_masks, patient_ids = batch
+#     mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+#     mask_pred = model(images.to(device=device, dtype=torch.float32))
+#     mask_pred_train = np.argmax(mask_pred.detach().cpu().numpy(), axis=1)
+#     mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+#     img_train = images[0][0]
+#     patient_id = patient_ids[0]
+#     fig = predictions_plot(img_train, mask_true_train, mask_pred_train, patient_id=patient_id)
+#     plt.show()
+#     break

@@ -10,6 +10,7 @@ first_files = [
     "UNET3D/unet_model/unet_model.py",
     "UNET3D/utils/dice_score.py",
     "UNET3D/utils/focal_loss.py",
+    "UNET3D/plot.py",
     "UNET3D/utils/generalized_dice.py",
     "UNET3D/visualize.py",
 ]

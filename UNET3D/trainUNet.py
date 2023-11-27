@@ -46,39 +46,26 @@ def train_model(
     #setup wandb    
 
     # 1. Create dataset #Note this is for testing
-    data_dir = Path('/work3/s211469/data')
+    data_dir = Path('/work3/s194572/data')
     patient_ids = np.loadtxt(data_dir / 'filenames.txt', dtype=str)
     val_pct = 0.1
     val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
     training_ids = [id for id in patient_ids if id not in val_ids]
 
     # 1. Create dataset and validation set
-    train_set = BrainDataset(patient_ids=training_ids, data_dir=data_dir, binary=True)
-    val_set = BrainDataset(patient_ids=val_ids, data_dir=data_dir, binary=True)
+    train_set = BrainDataset(patient_ids=training_ids, data_dir=data_dir, binary='WT')
+    val_set = BrainDataset(patient_ids=val_ids, data_dir=data_dir, binary='WT')
 
     # 3. Create data loaders set numworkers=4 as requested on HPC for faster data loading
     loader_args = dict(batch_size=batch_size, num_workers=4)
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
-
-    # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
-    # match optimizer:
-    #     case "Adam":
-    #         optimizer = optim.Adam(model.parameters(),
-    #                                 lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.999)) # <brug kun LR
-    #     case "RMSprop":
-    #         optimizer = optim.RMSprop(model.parameters(),lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
-    #     case "SGD":
-    #         optimizer = optim.SGD(model.parameters(),lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
+    
     optimizer = optim.Adam(model.parameters(),lr=1e-4)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
-    # weights = torch.tensor([1.01553413, 517.7032716, 98.72168775, 309.07898017]).to(device)
-    #criterion = nn.CrossEntropyLoss(weight=weights) <- legacy code maybe?
-    # criterion = focal_loss(alpha=None, gamma=2.0, ignore_index=-100, reduction='mean')
-    # criterion_gd = GeneralizedDiceLoss(include_background=True)
-    criterion = DiceFocalLoss(softmax=True, gamma=2.0)
+    criterion = GeneralizedDiceFocalLoss(softmax=True, gamma=2.0)
     global_step = 0
  
 
@@ -103,15 +90,7 @@ def train_model(
                 # loss = criterion(masks_pred, true_masks)
                 loss = criterion(masks_pred, F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float())
                 if wandb_active:
-                    wandb.log({"train/focal_loss": loss.item()})
-                # loss += criterion_gd(masks_pred, F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float())
-                # loss += criterion_ge.dice(F.softmax(masks_pred, dim=1).float(),
-                #                         F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(), weight=None)
-                # loss += dice_loss(
-                #     F.softmax(masks_pred, dim=1).float(),
-                #     F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(),
-                #     multiclass=True
-                # )
+                    wandb.log({"train/train_loss": loss.item()})
 
               optimizer.zero_grad(set_to_none=True)
               grad_scaler.scale(loss).backward()
@@ -130,21 +109,13 @@ def train_model(
                 wandb.log({"train/train_loss": loss.item()})
         
         # 6. Evaluate the model on the validation set
-        model.eval()
-        val_score = 0
-        for val_batch in val_loader:
-            images, true_masks, patient_ids = val_batch
-            images = images.to(device=device, dtype=torch.float32)
-            true_masks = true_masks.to(device=device, dtype=torch.long)
-            masks_pred = model(images)
-            #loss = val_criterion(masks_pred, true_masks.unsqueeze(1))
-            val_score += 1 - loss.item()
-        val_score = val_score/len(val_loader)
-        model.train()
-        scheduler.step(val_score)
+        val_score_dice, val_score_jaccard, confusion = evaluate(model, val_loader, device, amp)
+        scheduler.step(val_score_dice)
         if wandb_active:
-            wandb.log({"val/val_accuracy": val_score})
+            wandb.log({"val/val_accuracy_dice": val_score_dice})
+            wandb.log({"val/val_accuarce_jaccard:": val_score_jaccard})
             wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
+            print(f"confusion: {confusion}, at epoch {epoch}")
             if epoch % 2 == 0:
                 
                 mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
