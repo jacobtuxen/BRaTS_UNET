@@ -10,7 +10,7 @@ class BrainDataset(Dataset):
         self.patient_ids = patient_ids
         self.data_dir = data_dir
         self.binary = binary
-        self.extensions = ['flair.nii', 't1ce.nii', 't2.nii','seg.nii']
+        self.extensions = ['flair.nii.gz', 't1ce.nii.gz', 't2.nii.gz','seg.nii.gz']
 
     def load_nifti_file(self, file_path):
         return nib.load(file_path).get_fdata()
