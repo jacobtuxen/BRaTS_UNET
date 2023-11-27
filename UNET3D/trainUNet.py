@@ -18,15 +18,16 @@ from torch.utils.data import ConcatDataset
 from datetime import datetime
 from evaluate import evaluate
 from unet_model.unet_model import UNet3D
+from monai.losses import *
 import matplotlib.pyplot as plt
-from utils.dice_score import dice_loss
+# from utils.dice_score import dice_loss
 from UNET3D.visualize import visualize_model_output
 from UNET3D.data_loader import BrainDataset
 import wandb
 import gc
 
 WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
-USE_WANDB = True
+USE_WANDB = False
 
 def train_model(
         model,
@@ -52,8 +53,8 @@ def train_model(
     training_ids = [id for id in patient_ids if id not in val_ids]
 
     # 1. Create dataset and validation set
-    train_set = BrainDataset(patient_ids=training_ids, data_dir=data_dir)
-    val_set = BrainDataset(patient_ids=val_ids, data_dir=data_dir)
+    train_set = BrainDataset(patient_ids=training_ids, data_dir=data_dir, binary=True)
+    val_set = BrainDataset(patient_ids=val_ids, data_dir=data_dir, binary=True)
 
     # 3. Create data loaders set numworkers=4 as requested on HPC for faster data loading
     loader_args = dict(batch_size=batch_size, num_workers=4)
@@ -61,20 +62,23 @@ def train_model(
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
 
     # 4. Set up the optimizer, the loss, the learning rate scheduler and the loss scaling for AMP
-    match optimizer:
-        case "Adam":
-            optimizer = optim.Adam(model.parameters(),
-                                    lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.999))
-        case "RMSprop":
-            optimizer = optim.RMSprop(model.parameters(),lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
-        case "SGD":
-            optimizer = optim.SGD(model.parameters(),lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
+    # match optimizer:
+    #     case "Adam":
+    #         optimizer = optim.Adam(model.parameters(),
+    #                                 lr=learning_rate, weight_decay=weight_decay, betas=(0.9, 0.999)) # <brug kun LR
+    #     case "RMSprop":
+    #         optimizer = optim.RMSprop(model.parameters(),lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
+    #     case "SGD":
+    #         optimizer = optim.SGD(model.parameters(),lr=learning_rate, weight_decay=weight_decay, momentum=momentum)
+    optimizer = optim.Adam(model.parameters(),lr=1e-4)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
     # weights = torch.tensor([1.01553413, 517.7032716, 98.72168775, 309.07898017]).to(device)
     #criterion = nn.CrossEntropyLoss(weight=weights) <- legacy code maybe?
-
+    # criterion = focal_loss(alpha=None, gamma=2.0, ignore_index=-100, reduction='mean')
+    # criterion_gd = GeneralizedDiceLoss(include_background=True)
+    criterion = DiceFocalLoss(softmax=True, gamma=2.0)
     global_step = 0
  
 
@@ -96,14 +100,18 @@ def train_model(
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                 masks_pred = model(images)
-                loss = tvops.focal_loss.sigmoid_focal_loss(inputs=masks_pred, targets=F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(), gamma=2.0, alpha=0.25, reduction='mean')
+                # loss = criterion(masks_pred, true_masks)
+                loss = criterion(masks_pred, F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float())
                 if wandb_active:
                     wandb.log({"train/focal_loss": loss.item()})
-                loss += dice_loss(
-                    F.softmax(masks_pred, dim=1).float(),
-                    F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(),
-                    multiclass=True
-                )
+                # loss += criterion_gd(masks_pred, F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float())
+                # loss += criterion_ge.dice(F.softmax(masks_pred, dim=1).float(),
+                #                         F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(), weight=None)
+                # loss += dice_loss(
+                #     F.softmax(masks_pred, dim=1).float(),
+                #     F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(),
+                #     multiclass=True
+                # )
 
               optimizer.zero_grad(set_to_none=True)
               grad_scaler.scale(loss).backward()
@@ -122,11 +130,10 @@ def train_model(
                 wandb.log({"train/train_loss": loss.item()})
         val_score = evaluate(model, val_loader, device, amp)
         scheduler.step(val_score)
-        
         if wandb_active:
             wandb.log({"val/val_accuracy": val_score})
             wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
-            if epoch % 5 == 0:
+            if epoch % 2 == 0:
                 fig = visualize_model_output(epoch, images[0], model, patient_ids[0], device)
                 wandb.log({"train/plot": fig})
                 fig.clf()
@@ -153,13 +160,13 @@ if USE_WANDB:
             "momentum": {"values": [0.9, 0.99]},
             "amp": {"values": [True]},
             "gradient_clipping": {"values": [1.0]},
-            "optimizer": {"values": ["RMSprop"]},
+            "optimizer": {"values": ["Adam"]},
         }
     }
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{timestamp}")
 
 def run_model():
-    model = UNet3D(n_channels=3, n_classes=4, trilinear=False, scale_channels=1)
+    model = UNet3D(n_channels=3, n_classes=2, trilinear=False, scale_channels=1)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device=device)
     if USE_WANDB:
