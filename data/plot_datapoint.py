@@ -22,12 +22,17 @@ for i in range(len(extensions)):
                          loc='lower center', fontsize='7', bbox_to_anchor=(0.53, -0.4), frameon=False)
         else:
             img = ax[i].imshow(data[i][:, :, slice_idx], cmap='bone')
-            if i == 0:
-                cbar = plt.colorbar(img, ax=ax[i], pad = 0.05, location='left')
         ax[i].set_xticks([])
         ax[i].set_yticks([])
         ax[i].set_title(f'{modality_names[i]}')
 
+# Adjust layout to make room for the colorbar at the bottom
+fig.subplots_adjust(bottom=0.2)
+
+# Position the colorbar below the subplots
+cbar_ax = fig.add_axes([0.125, 0.25, 0.615, 0.05])  # Adjust these values as needed
+cbar = fig.colorbar(img, cax=cbar_ax, orientation='horizontal')
+cbar.set_ticklabels(['0', '0.125', '0.25', '0.375', '0.5', '0.625', '0.75', '0.875'])
 plt.show()
 
 
