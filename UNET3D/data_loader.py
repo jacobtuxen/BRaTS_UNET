@@ -6,7 +6,7 @@ from pathlib import Path
 import torch.nn.functional as F
 
 class BrainDataset(Dataset):
-    def __init__(self, patient_ids: list, data_dir: Path, binary=False):
+    def __init__(self, patient_ids: list, data_dir: Path, binary='WT'): #(WT, TC, ET)
         self.patient_ids = patient_ids
         self.data_dir = data_dir
         self.binary = binary
@@ -23,9 +23,15 @@ class BrainDataset(Dataset):
         data_paths = [self.data_dir / patient_id / f'{patient_id}_{data_id}' for data_id in self.extensions]
         data = [self.load_nifti_file(path) for path in data_paths]
         target = torch.from_numpy(np.where(data[-1]==4, 3, data[-1])).long()
-        if self.binary:
+        if self.binary == 'WT':
             target = torch.where(target==0, 0, 1)
-        #Cat
+        elif self.binary == 'MT':
+            target = torch.where(target==3, 1, target)
+            target = torch.where(target==2, 0, target)
+        elif self.binary == 'TC':
+            target = torch.where(target==1, 1, 0)
+        else:
+            raise ValueError('binary must be one of: WT, MT, TC')
         data = torch.cat([torch.from_numpy(data[i]).unsqueeze(0) for i in range(len(self.extensions)-1)], dim=0)
 
         start_idx = 56
@@ -44,7 +50,11 @@ class BrainDataset(Dataset):
 # #Test loader    
 # patient_ids = ['BraTS2021_00495']
 # data_dir = Path.home() / 'Desktop' / 'Deep Learning' / 'BRaTS_UNET' / 'data' / 'archive'
-# dataset = BrainDataset(patient_ids, data_dir)
+# dataset = BrainDataset(patient_ids, data_dir, binary='TC')
 # data, target,_ = dataset[0]
 # print(data.shape)
 # print(target.shape)
+# #visualize target
+# import matplotlib.pyplot as plt
+# plt.imshow(target[:,:,70])
+# plt.show()
