@@ -46,8 +46,8 @@ def train_model(
     #setup wandb    
 
     # 1. Create dataset #Note this is for testing
-    data_dir = Path('/work3/s194572/data')
-    patient_ids = np.loadtxt(data_dir / 'filenames_filtered.txt', dtype=str)
+    data_dir = Path('/work3/s211469/data')
+    patient_ids = np.loadtxt(data_dir / 'filenames.txt', dtype=str)
     val_pct = 0.1
     val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
     training_ids = [id for id in patient_ids if id not in val_ids]
@@ -128,7 +128,19 @@ def train_model(
               #LOG WANDB
               if wandb_active:
                 wandb.log({"train/train_loss": loss.item()})
-        val_score = evaluate(model, val_loader, device, amp)
+        
+        # 6. Evaluate the model on the validation set
+        model.eval()
+        val_score = 0
+        for val_batch in val_loader:
+            images, true_masks, patient_ids = val_batch
+            images = images.to(device=device, dtype=torch.float32)
+            true_masks = true_masks.to(device=device, dtype=torch.long)
+            masks_pred = model(images)
+            loss = val_criterion(masks_pred, true_masks.unsqueeze(1))
+            val_score += 1 - loss.item()
+        val_score = val_score/len(val_loader)
+        model.train()
         scheduler.step(val_score)
         if wandb_active:
             wandb.log({"val/val_accuracy": val_score})
@@ -153,9 +165,9 @@ if USE_WANDB:
         "name": "sweep",
         "metric": {"goal": "maximize", "name": "val/val_accuracy"},
         "parameters": {
-            "batch_size": {"values": [2,4]},
+            "batch_size": {"values": [6,8]},
             "lr": {"max": 1e-3, "min": 1e-6},
-            "epochs": {"values": [30]},
+            "epochs": {"values": [50]},
             "weight_decay": {"max": 1e-3, "min": 1e-6},
             "momentum": {"values": [0.9, 0.99]},
             "amp": {"values": [True]},
