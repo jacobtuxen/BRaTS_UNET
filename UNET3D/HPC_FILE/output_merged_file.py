@@ -9,7 +9,7 @@ import torch.nn.functional as F
 class DoubleConv(nn.Module):
     """(convolution => [BN] => ReLU) * 2"""
 
-    def __init__(self, in_channels, out_channels, mid_channels=None):
+    def __init__(self, in_channels, out_channels, mid_channels=None, dropout = 0.0):
         super().__init__()
         if not mid_channels:
             mid_channels = out_channels
@@ -17,9 +17,11 @@ class DoubleConv(nn.Module):
             nn.Conv3d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm3d(mid_channels),
             nn.ReLU(inplace=True),
+            nn.Dropout3d(dropout),
             nn.Conv3d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm3d(out_channels),
-            nn.ReLU(inplace=True)
+            nn.ReLU(inplace=True),
+            nn.Dropout3d(dropout)
         )
 
     def forward(self, x):
@@ -29,11 +31,11 @@ class DoubleConv(nn.Module):
 class Down(nn.Module):
     """Downscaling with maxpool then double conv"""
 
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, dropout = 0.0):
         super().__init__()
         self.maxpool_conv = nn.Sequential(
             nn.MaxPool3d(2),
-            DoubleConv(in_channels, out_channels)
+            DoubleConv(in_channels, out_channels, dropout=dropout)
         )
 
     def forward(self, x):
@@ -43,7 +45,7 @@ class Down(nn.Module):
 class Up(nn.Module):
     """Upscaling then double conv"""
 
-    def __init__(self, in_channels, out_channels, trilinear=True):
+    def __init__(self, in_channels, out_channels, trilinear=True, dropout = 0.0):
         super().__init__()
 
         # if trilinear, use the normal convolutions to reduce the number of channels
@@ -52,7 +54,7 @@ class Up(nn.Module):
             self.conv = DoubleConv(in_channels, out_channels, in_channels // 2)
         else:
             self.up = nn.ConvTranspose3d(in_channels , in_channels // 2, kernel_size=2, stride=2)
-            self.conv = DoubleConv(in_channels, out_channels)
+            self.conv = DoubleConv(in_channels, out_channels, dropout=dropout)
 
     def forward(self, x1, x2):
         x1 = self.up(x1)
@@ -90,14 +92,14 @@ class UNet3D(nn.Module):
         self.n_classes = n_classes
         self.trilinear = trilinear
 
-        self.inc = (DoubleConv(n_channels, 32//scale_channels))
-        self.down1 = (Down(32//scale_channels, 64//scale_channels))
-        self.down2 = (Down(64//scale_channels, 128//scale_channels))
-        self.down3 = (Down(128//scale_channels, 256//scale_channels))
+        self.inc = (DoubleConv(n_channels, 32//scale_channels, dropout=0.1))
+        self.down1 = (Down(32//scale_channels, 64//scale_channels, dropout=0.1))
+        self.down2 = (Down(64//scale_channels, 128//scale_channels, dropout=0.2))
+        self.down3 = (Down(128//scale_channels, 256//scale_channels, dropout=0.3))
         factor = 2 if trilinear else 1
-        self.up1 = (Up(256//scale_channels, (128//scale_channels) // factor, trilinear))
-        self.up2 = (Up(128//scale_channels, (64//scale_channels) // factor, trilinear))
-        self.up3 = (Up(64//scale_channels, (32//scale_channels) // factor, trilinear))
+        self.up1 = (Up(256//scale_channels, (128//scale_channels) // factor, trilinear, dropout=0.1))
+        self.up2 = (Up(128//scale_channels, (64//scale_channels) // factor, trilinear, dropout=0.2))
+        self.up3 = (Up(64//scale_channels, (32//scale_channels) // factor, trilinear, dropout=0.3))
         self.outc = (OutConv(32//scale_channels, n_classes))
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
@@ -176,6 +178,210 @@ def dice_loss(input: Tensor, target: Tensor, multiclass: bool = False):
     fn = multiclass_dice_coeff if multiclass else dice_coeff
     return 1 - fn(input, target, reduce_batch_first=True)
 
+# Content from: UNET3D/utils/focal_loss.py
+from typing import Optional, Sequence
+import torch
+from torch import Tensor
+from torch import nn
+from torch.nn import functional as F
+
+
+class FocalLoss(nn.Module):
+    """ Focal Loss, as described in https://arxiv.org/abs/1708.02002.
+
+    It is essentially an enhancement to cross entropy loss and is
+    useful for classification tasks when there is a large class imbalance.
+    x is expected to contain raw, unnormalized scores for each class.
+    y is expected to contain class labels.
+
+    Shape:
+        - x: (batch_size, C) or (batch_size, C, d1, d2, ..., dK), K > 0.
+        - y: (batch_size,) or (batch_size, d1, d2, ..., dK), K > 0.
+    """
+
+    def __init__(self,
+                 alpha: Optional[Tensor] = None,
+                 gamma: float = 0.,
+                 reduction: str = 'mean',
+                 ignore_index: int = -100):
+        """Constructor.
+
+        Args:
+            alpha (Tensor, optional): Weights for each class. Defaults to None.
+            gamma (float, optional): A constant, as described in the paper.
+                Defaults to 0.
+            reduction (str, optional): 'mean', 'sum' or 'none'.
+                Defaults to 'mean'.
+            ignore_index (int, optional): class label to ignore.
+                Defaults to -100.
+        """
+        if reduction not in ('mean', 'sum', 'none'):
+            raise ValueError(
+                'Reduction must be one of: "mean", "sum", "none".')
+
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+        self.ignore_index = ignore_index
+        self.reduction = reduction
+
+        self.nll_loss = nn.NLLLoss(
+            weight=alpha, reduction='none', ignore_index=ignore_index)
+
+    def __repr__(self):
+        arg_keys = ['alpha', 'gamma', 'ignore_index', 'reduction']
+        arg_vals = [self.__dict__[k] for k in arg_keys]
+        arg_strs = [f'{k}={v!r}' for k, v in zip(arg_keys, arg_vals)]
+        arg_str = ', '.join(arg_strs)
+        return f'{type(self).__name__}({arg_str})'
+
+    def forward(self, x: Tensor, y: Tensor) -> Tensor:
+        if x.ndim > 2:
+            # (N, C, d1, d2, ..., dK) --> (N * d1 * ... * dK, C)
+            c = x.shape[1]
+            x = x.permute(0, *range(2, x.ndim), 1).reshape(-1, c)
+            # (N, d1, d2, ..., dK) --> (N * d1 * ... * dK,)
+            y = y.view(-1)
+
+        unignored_mask = y != self.ignore_index
+        y = y[unignored_mask]
+        if len(y) == 0:
+            return torch.tensor(0.)
+        x = x[unignored_mask]
+
+        # compute weighted cross entropy term: -alpha * log(pt)
+        # (alpha is already part of self.nll_loss)
+        log_p = F.log_softmax(x, dim=-1)
+        ce = self.nll_loss(log_p, y)
+
+        # get true class column from each row
+        all_rows = torch.arange(len(x))
+        log_pt = log_p[all_rows, y]
+
+        # compute focal term: (1 - pt)^gamma
+        pt = log_pt.exp()
+        focal_term = (1 - pt)**self.gamma
+
+        # the full loss: -alpha * ((1 - pt)^gamma) * log(pt)
+        loss = focal_term * ce
+
+        if self.reduction == 'mean':
+            loss = loss.mean()
+        elif self.reduction == 'sum':
+            loss = loss.sum()
+
+        return loss
+
+
+def focal_loss(alpha: Optional[Sequence] = None,
+               gamma: float = 0.,
+               reduction: str = 'mean',
+               ignore_index: int = -100,
+               device='cpu',
+               dtype=torch.float32) -> FocalLoss:
+    """Factory function for FocalLoss.
+
+    Args:
+        alpha (Sequence, optional): Weights for each class. Will be converted
+            to a Tensor if not None. Defaults to None.
+        gamma (float, optional): A constant, as described in the paper.
+            Defaults to 0.
+        reduction (str, optional): 'mean', 'sum' or 'none'.
+            Defaults to 'mean'.
+        ignore_index (int, optional): class label to ignore.
+            Defaults to -100.
+        device (str, optional): Device to move alpha to. Defaults to 'cpu'.
+        dtype (torch.dtype, optional): dtype to cast alpha to.
+            Defaults to torch.float32.
+
+    Returns:
+        A FocalLoss object
+    """
+    if alpha is not None:
+        if not isinstance(alpha, Tensor):
+            alpha = torch.tensor(alpha)
+        alpha = alpha.to(device=device, dtype=dtype)
+
+    fl = FocalLoss(
+        alpha=alpha,
+        gamma=gamma,
+        reduction=reduction,
+        ignore_index=ignore_index)
+    return fl
+
+# Content from: UNET3D/utils/generalized_dice.py
+import torch
+import torch.nn as nn
+
+class _AbstractDiceLoss(nn.Module):
+    """
+    Base class for different implementations of Dice loss.
+    """
+
+    def __init__(self, weight=None, normalization='sigmoid'):
+        super(_AbstractDiceLoss, self).__init__()
+        self.register_buffer('weight', weight)
+        # The output from the network during training is assumed to be un-normalized probabilities and we would
+        # like to normalize the logits. Since Dice (or soft Dice in this case) is usually used for binary data,
+        # normalizing the channels with Sigmoid is the default choice even for multi-class segmentation problems.
+        # However if one would like to apply Softmax in order to get the proper probability distribution from the
+        # output, just specify `normalization=Softmax`
+        assert normalization in ['sigmoid', 'softmax', 'none']
+        if normalization == 'sigmoid':
+            self.normalization = nn.Sigmoid()
+        elif normalization == 'softmax':
+            self.normalization = nn.Softmax(dim=1)
+        else:
+            self.normalization = lambda x: x
+
+    def dice(self, input, target, weight):
+        # actual Dice score computation; to be implemented by the subclass
+        raise NotImplementedError
+
+    def forward(self, input, target):
+        # get probabilities from logits
+        input = self.normalization(input)
+
+        # compute per channel Dice coefficient
+        per_channel_dice = self.dice(input, target, weight=self.weight)
+
+        # average Dice score across all channels/classes
+        return 1. - torch.mean(per_channel_dice)
+
+class GeneralizedDiceLoss(_AbstractDiceLoss):
+    """Computes Generalized Dice Loss (GDL) as described in https://arxiv.org/pdf/1707.03237.pdf.
+    """
+
+    def __init__(self, normalization='sigmoid', epsilon=1e-6):
+        super().__init__(weight=None, normalization=normalization)
+        self.epsilon = epsilon
+
+    def dice(self, input, target, weight):
+        assert input.size() == target.size(), "'input' and 'target' must have the same shape"
+
+        input = torch.flatten(input)
+        target = torch.flatten(target)
+        target = target.float()
+
+        if input.size(0) == 1:
+            # for GDL to make sense we need at least 2 channels (see https://arxiv.org/pdf/1707.03237.pdf)
+            # put foreground and background voxels in separate channels
+            input = torch.cat((input, 1 - input), dim=0)
+            target = torch.cat((target, 1 - target), dim=0)
+
+        # GDL weighting: the contribution of each label is corrected by the inverse of its volume
+        w_l = target.sum(-1)
+        w_l = 1 / (w_l * w_l).clamp(min=self.epsilon)
+        w_l.requires_grad = False
+
+        intersect = (input * target).sum(-1)
+        intersect = intersect * w_l
+
+        denominator = (input + target).sum(-1)
+        denominator = (denominator * w_l).clamp(min=self.epsilon)
+
+        return 2 * (intersect.sum() / denominator.sum())
+
 # Content from: UNET3D/visualize.py
 import torch
 import numpy as np
@@ -184,30 +390,77 @@ import nibabel as nib
 
 def visualize_model_output(epoch, input, model, patient_id, device):
   slices = np.linspace(10,100, 5)
-  plot_titles = ['flair','t1', 't1ce', 't2','seg']
+  plot_titles = ['flair', 't1ce', 't2','seg', 'output']
 
   model.eval()
   with torch.no_grad():
     input = input.unsqueeze(0).to(device)
     output = model(input).cpu().numpy()
-    output = np.argmax(output, axis=1)
-  
-  fig, ax = plt.subplots(len(slices), 6, figsize=(15, 5))
-  originals = [nib.load(f'/work3/s194572/data/{patient_id}/{patient_id}_{titles}').get_fdata() for titles in ['flair.nii','t1.nii', 't1ce.nii', 't2.nii','seg.nii']]
-  for idj, slice_ in enumerate(slices):
-    for idx, original in enumerate(originals):
-      ax[idj, idx].imshow(original[:,:,int(slice_)], cmap='gray')
-      ax[idj, idx].axis('off')
-      if idj == 0 and idx == 0:
-        ax[0, idx].set_title(f'E: {epoch}, {plot_titles[idx]}')
-      elif idj == 0:
-        ax[0, idx].set_title(f'{plot_titles[idx]}')
-    ax[idj, 5].imshow(output[0,:,:,int(slice_)], cmap='gray')
-    ax[idj, 5].axis('off')
-    if idj == 0:
-      ax[0, 5].set_title(f'Prediction')
+    output = np.argmax(output, axis=1) #<- #0 air
+    input_images = input.cpu().numpy()
+
+  input_images = np.squeeze(input_images, axis=0)
+  fig, ax = plt.subplots(len(slices), 5, figsize=(15, 5))
+  seg = [nib.load(f'/work3/s194572/data/{patient_id}/{patient_id}_{titles}').get_fdata() for titles in ['seg.nii']]
+
+  for i, slice in enumerate(slices):
+    for j in range(len(plot_titles)):
+      if j == 0:
+        ax[i, j].imshow(input_images[0, :, :, int(slice)], cmap='gray')
+        ax[i,j].set_xticks([])
+        ax[i,j].set_yticks([])
+      elif j == 1:
+        ax[i, j].imshow(input_images[1, :, :, int(slice)], cmap='gray')
+        ax[i,j].set_xticks([])
+        ax[i,j].set_yticks([])
+      elif j == 2:
+        ax[i, j].imshow(input_images[2, :, :, int(slice)], cmap='gray')
+        ax[i,j].set_xticks([])
+        ax[i,j].set_yticks([])
+      elif j == 3:
+        ax[i, j].imshow(seg[0][:, :, int(slice)], cmap='gray')
+        ax[i,j].set_xticks([])
+        ax[i,j].set_yticks([])
+      elif j == 4:
+        ax[i, j].imshow(output[0, :, :, int(slice)], cmap='gray')
+        ax[i,j].set_xticks([])
+        ax[i,j].set_yticks([])
+      if i==0:
+        ax[i, j].set_title(f'{plot_titles[j]}')
+      
   model.train()
   return fig
+
+# Content from: UNET3D/class_distributions.py
+import torch
+import numpy as np
+import matplotlib.pyplot as plt
+import nibabel as nib
+from pathlib import Path
+
+data_dir = Path('/work3/s211469/data')
+patient_ids = np.loadtxt(data_dir / 'filenames.txt', dtype=str)
+extension = 'seg.nii'
+distributions = []
+
+for patient_id in patient_ids:
+    data_path = data_dir / patient_id / f'{patient_id}_{extension}'
+    target = nib.load(data_path).get_fdata()
+    
+    start_idx = 56
+    end_idx = 184
+    start_idx_height = 13
+    end_idx_height = 141
+    target = target[start_idx:end_idx,start_idx:end_idx,start_idx_height:end_idx_height]
+
+    target = np.where(target==4, 3, target)
+
+    distribution = np.bincount(target.flatten().astype(int))
+    distributions.append(distribution)
+    print(f'Patient {patient_id} done')
+#Save distributions
+distributions = np.asarray(distributions)
+np.save('class_distributions.npy', distributions)
 
 # Content from: UNET3D/data_loader.py
 import torch
@@ -246,16 +499,8 @@ class BrainDataset(Dataset):
         data = data[:,start_idx:end_idx,start_idx:end_idx,start_idx_height:end_idx_height]
         target = target[start_idx:end_idx,start_idx:end_idx,start_idx_height:end_idx_height]
         
-        #normalize data in each channel, and set between 0 and 1
-        # Normalize each channel independently
-        for i in range(data.shape[0]):  # Iterate over channels
-            channel = data[i, :, :, :]
-            mean = channel.mean()
-            std = channel.std()
-            # Normalize this channel
-            data[i, :, :, :] = (channel - mean) / std
-            # Optionally clamp values to [0, 1]
-            data[i, :, :, :] = torch.clamp(data[i, :, :, :], 0, 1)
+        #normalize data in each channel min max normalization
+        data = data - data.min() / (1e-5 + (data.max() - data.min())) 
 
         return data, target, patient_id
 
@@ -328,6 +573,7 @@ from torch.utils.data import DataLoader, random_split
 from torch.utils.data import ConcatDataset
 from datetime import datetime
 import matplotlib.pyplot as plt
+from monai.losses import GeneralizedDiceLoss, GeneralizedDiceFocalLoss
 import wandb
 import gc
 
@@ -351,8 +597,8 @@ def train_model(
     #setup wandb    
 
     # 1. Create dataset #Note this is for testing
-    data_dir = Path('/work3/s194572/data')
-    patient_ids = np.loadtxt(data_dir / 'filenames_filtered.txt', dtype=str)
+    data_dir = Path('/work3/s211469/data')
+    patient_ids = np.loadtxt(data_dir / 'filenames.txt', dtype=str)
     val_pct = 0.1
     val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
     training_ids = [id for id in patient_ids if id not in val_ids]
@@ -380,7 +626,9 @@ def train_model(
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
     # weights = torch.tensor([1.01553413, 517.7032716, 98.72168775, 309.07898017]).to(device)
     #criterion = nn.CrossEntropyLoss(weight=weights) <- legacy code maybe?
-
+    criterion = GeneralizedDiceFocalLoss(to_onehot_y = True, softmax = True)
+    val_criterion = GeneralizedDiceLoss(to_onehot_y = True, softmax = True)
+    
     global_step = 0
  
 
@@ -402,14 +650,17 @@ def train_model(
 
               with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
                 masks_pred = model(images)
+                loss = criterion(masks_pred, true_masks.unsqueeze(1)) #Input must be (N, C, H, W, D)
+
+
                 # loss = tvops.focal_loss.sigmoid_focal_loss(inputs=masks_pred, targets=F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(), gamma=2.0, alpha=0.25, reduction='mean')
-                if wandb_active:
-                    wandb.log({"train/focal_loss": loss.item()})
-                loss = dice_loss(
-                    F.softmax(masks_pred, dim=1).float(),
-                    F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(),
-                    multiclass=True
-                )
+                # if wandb_active:
+                #     wandb.log({"train/focal_loss": loss.item()})
+                # loss += dice_loss(
+                #     F.softmax(masks_pred, dim=1).float(),
+                #     F.one_hot(true_masks, model.n_classes).permute(0, 4, 1, 2, 3).float(),
+                #     multiclass=True
+                # )
 
               optimizer.zero_grad(set_to_none=True)
               grad_scaler.scale(loss).backward()
@@ -426,8 +677,23 @@ def train_model(
               #LOG WANDB
               if wandb_active:
                 wandb.log({"train/train_loss": loss.item()})
-        val_score = evaluate(model, val_loader, device, amp)
+        
+        # 6. Evaluate the model on the validation set
+        model.eval()
+        val_score = 0
+        for val_batch in val_loader:
+            images, true_masks, patient_ids = val_batch
+            images = images.to(device=device, dtype=torch.float32)
+            true_masks = true_masks.to(device=device, dtype=torch.long)
+            masks_pred = model(images)
+            loss = val_criterion(masks_pred, true_masks.unsqueeze(1))
+            val_score += 1 - loss.item()
+        val_score = val_score/len(val_loader)
+        model.train()
         scheduler.step(val_score)
+
+        # val_score = evaluate(model, val_loader, device, amp)
+        # scheduler.step(val_score)
         
         if wandb_active:
             wandb.log({"val/val_accuracy": val_score})
@@ -452,17 +718,17 @@ if USE_WANDB:
         "name": "sweep",
         "metric": {"goal": "maximize", "name": "val/val_accuracy"},
         "parameters": {
-            "batch_size": {"values": [2,4]},
+            "batch_size": {"values": [6,8]},
             "lr": {"max": 1e-3, "min": 1e-6},
-            "epochs": {"values": [30]},
+            "epochs": {"values": [50]},
             "weight_decay": {"max": 1e-3, "min": 1e-6},
             "momentum": {"values": [0.9, 0.99]},
             "amp": {"values": [True]},
             "gradient_clipping": {"values": [1.0]},
-            "optimizer": {"values": ["RMSprop"]},
+            "optimizer": {"values": ["Adam"]},
         }
     }
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_SWEEP_{timestamp}")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_focal_GDL_{timestamp}")
 
 def run_model():
     model = UNet3D(n_channels=3, n_classes=4, trilinear=False, scale_channels=1)
