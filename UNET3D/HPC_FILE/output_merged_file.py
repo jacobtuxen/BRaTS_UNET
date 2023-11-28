@@ -737,7 +737,7 @@ import wandb
 import gc
 
 WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
-USE_WANDB = False
+USE_WANDB = True
 
 def train_model(
         model,
@@ -751,6 +751,7 @@ def train_model(
         gradient_clipping: float = 1.0,
         optimizer: str = "RMSprop",
         wandb_active = False,
+        dataset_type = 'WT'
 ):
     # 0. Set up loggin for wandb
     #setup wandb    
@@ -763,8 +764,8 @@ def train_model(
     training_ids = [id for id in patient_ids if id not in val_ids]
 
     # 1. Create dataset and validation set
-    train_set = BrainDataset(patient_ids=training_ids, data_dir=data_dir, binary='WT')
-    val_set = BrainDataset(patient_ids=val_ids, data_dir=data_dir, binary='WT')
+    train_set = BrainDataset(patient_ids=training_ids, data_dir=data_dir, binary=dataset_type)
+    val_set = BrainDataset(patient_ids=val_ids, data_dir=data_dir, binary=dataset_type)
 
     # 3. Create data loaders set numworkers=4 as requested on HPC for faster data loading
     loader_args = dict(batch_size=batch_size, num_workers=4)
@@ -869,7 +870,9 @@ if USE_WANDB:
             "optimizer": {"values": ["Adam"]},
         }
     }
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{timestamp}")
+    #set dataloader
+    dataset_type = ['WT', 'TC', 'ET']
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{dataset_type[0]}")
 
 def run_model():
     model = UNet3D(n_channels=3, n_classes=2, trilinear=False, scale_channels=1)
@@ -887,7 +890,8 @@ def run_model():
                     momentum=wandb.config.momentum, 
                     gradient_clipping=wandb.config.gradient_clipping,
                     optimizer=wandb.config.optimizer,
-                    wandb_active=True
+                    wandb_active=True,
+                    dataset_type=dataset_type[0]
                     )
 
     else:

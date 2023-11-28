@@ -25,7 +25,7 @@ import wandb
 import gc
 
 WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
-USE_WANDB = False
+USE_WANDB = True
 
 def train_model(
         model,
@@ -45,7 +45,7 @@ def train_model(
     #setup wandb    
 
     # 1. Create dataset #Note this is for testing
-    data_dir = Path('/work3/s194572/data')
+    data_dir = Path('/work3/s211469/data')
     patient_ids = np.loadtxt(data_dir / 'filenames_filtered.txt', dtype=str)
     val_pct = 0.1
     val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)

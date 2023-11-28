@@ -13,6 +13,7 @@ first_files = [
     "UNET3D/plot.py",
     "UNET3D/utils/generalized_dice.py",
     "UNET3D/visualize.py",
+    "UNET3D/class_distributions.py"
 ]
 
 # Specify files to be excluded

@@ -17,7 +17,7 @@ def visualize_model_output(epoch, input, model, patient_id, device):
 
   input_images = np.squeeze(input_images, axis=0)
   fig, ax = plt.subplots(len(slices), 5, figsize=(15, 5))
-  seg = [nib.load(f'/work3/s194572/data/{patient_id}/{patient_id}_{titles}').get_fdata() for titles in ['seg.nii']]
+  seg = [nib.load(f'/work3/s211469/data/{patient_id}/{patient_id}_{titles}').get_fdata() for titles in ['seg.nii']]
 
   for i, slice in enumerate(slices):
     for j in range(len(plot_titles)):
