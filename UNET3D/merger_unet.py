@@ -49,7 +49,8 @@ ignored_imports = [
     "from UNET3D.data_loader import BrainDataset",
     "from UNET3D.visualize import visualize_model_output",
     "from utils.focal_loss import focal_loss",
-    "from utils.generalized_dice import GeneralizedDiceLoss"
+    "from utils.generalized_dice import GeneralizedDiceLoss",
+    "from UNET3D.plot import predictions_plot"
 ]
 
 with open(output_file_path, 'w', encoding='utf-8') as output_file:

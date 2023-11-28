@@ -318,7 +318,7 @@ from torch.nn.functional import one_hot
 from skimage.util import montage
 import matplotlib.pyplot as plt
 import sys
-# sys.path.append('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET')
+#sys.path.append('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET')
 import torch.nn.functional as F
 from matplotlib.lines import Line2D
 
@@ -394,19 +394,22 @@ def predictions_plot(image, mask_true, mask_pred, patient_id='BraTS2021_00495'):
 # #Test loader    
 # patient_ids = ['BraTS2021_00495']
 # data_dir = Path(str('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET/data/archive'))
-# dataset = BrainDataset(patient_ids, data_dir, binary=True)
+# dataset = BrainDataset(patient_ids, data_dir, binary='TC')
 # train_loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
 # print('loading data')
 # for batch in train_loader:
 #     images, true_masks, patient_ids = batch
-#     mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+#     # mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
 #     mask_pred = model(images.to(device=device, dtype=torch.float32))
-#     mask_pred_train = np.argmax(mask_pred.detach().cpu().numpy(), axis=1)
-#     mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
-#     img_train = images[0][0]
-#     patient_id = patient_ids[0]
-#     fig = predictions_plot(img_train, mask_true_train, mask_pred_train, patient_id=patient_id)
-#     plt.show()
+#     mask_pred = F.one_hot(mask_pred.argmax(dim=1), model.n_classes).permute(0, 4, 1, 2, 3).float()
+#     print(f'mask_pred shape: {mask_pred.shape}')
+#     print(f'mask_true shape: {true_masks.shape}')
+#     # mask_pred_train = np.argmax(mask_pred.detach().cpu().numpy(), axis=1)
+#     # mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+#     # img_train = images[0][0]
+#     # patient_id = patient_ids[0]
+#     # # fig = predictions_plot(img_train, mask_true_train, mask_pred_train, patient_id=patient_id)
+#     # # plt.show()
 #     break
 
 # Content from: UNET3D/utils/generalized_dice.py
@@ -671,13 +674,14 @@ import torch.nn.functional as F
 from monai.losses import *
 from torchmetrics import JaccardIndex, ConfusionMatrix
 from torchmetrics import Dice as DiceMetric
+import torch.nn.functional as F
 
 @torch.inference_mode()
 def evaluate(net, dataloader, device, amp):
     net.eval()
-    jaccard = JaccardIndex(task="binary" ,num_classes=net.n_classes)
-    dice = DiceMetric(num_classes=net.n_classes)
-    confusionmat = ConfusionMatrix(num_classes=net.n_classes)
+    jaccard = JaccardIndex(task="binary" ,num_classes=net.n_classes).to(device=device)
+    dice = DiceMetric(num_classes=net.n_classes).to(device=device)
+    #confusionmat = ConfusionMatrix(task = 'binary', num_classes=net.n_classes).to(device=device)
     num_val_batches = len(dataloader)
     dice_score = 0
     jaccard_score = 0
@@ -691,15 +695,21 @@ def evaluate(net, dataloader, device, amp):
             # move images and labels to correct device and type
             image = image.to(device=device, dtype=torch.float32)
             mask_true = mask_true.to(device=device, dtype=torch.long)
+            mask_true = F.one_hot(mask_true, net.n_classes).permute(0, 4, 1, 2, 3).long()
 
             # predict the mask
             mask_pred = net(image)
             # mask_true = F.one_hot(mask_true, net.n_classes).permute(0, 4, 1, 2, 3).float()
-            mask_pred = F.one_hot(mask_pred.argmax(dim=1), net.n_classes).permute(0, 4, 1, 2, 3).float()
+            mask_pred = F.one_hot(mask_pred.argmax(dim=1), net.n_classes).permute(0, 4, 1, 2, 3).long()
             # compute the Dice score, ignoring background
+            mask_pred = mask_pred.to(device=device)
+            print(f'Mask true on device: {mask_true.device}')
+            print(f'Mask pred on device: {mask_pred.device}')
+
+
             jaccard_score += jaccard(mask_pred, mask_true)
-            dice_score = dice(mask_true, mask_true)
-            confusion += confusionmat(mask_pred, mask_true)
+            dice_score += dice(mask_pred, mask_true)
+            #confusion += confusionmat(mask_pred, mask_true)
 
     net.train()
     return dice_score / max(num_val_batches, 1), jaccard_score / max(num_val_batches, 1), confusion
@@ -709,8 +719,6 @@ def evaluate(net, dataloader, device, amp):
 import logging
 from pathlib import Path
 import sys
-git_dir = Path.home() / 'Documents' / 'DTU' / 'E23' / '02456_Deep_Learning' / 'Brain_Project' / 'BRaTS_UNET'
-sys.path.append(str(git_dir))
 import os
 import torch
 import torch.nn as nn
@@ -725,7 +733,6 @@ from torch.utils.data import ConcatDataset
 from datetime import datetime
 from monai.losses import *
 import matplotlib.pyplot as plt
-from UNET3D.plot import predictions_plot
 import wandb
 import gc
 
@@ -750,7 +757,7 @@ def train_model(
 
     # 1. Create dataset #Note this is for testing
     data_dir = Path('/work3/s194572/data')
-    patient_ids = np.loadtxt(data_dir / 'filenames.txt', dtype=str)
+    patient_ids = np.loadtxt(data_dir / 'filenames_filtered.txt', dtype=str)
     val_pct = 0.1
     val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
     training_ids = [id for id in patient_ids if id not in val_ids]
