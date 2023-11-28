@@ -6,7 +6,7 @@ from pathlib import Path
 import torch.nn.functional as F
 
 class BrainDataset(Dataset):
-    def __init__(self, patient_ids: list, data_dir: Path, binary='WT'): #(WT, TC, ET)
+    def __init__(self, patient_ids: list, data_dir: Path, binary='WT'): #(WT, TC, MT)
         self.patient_ids = patient_ids
         self.data_dir = data_dir
         self.binary = binary

@@ -12,8 +12,7 @@ first_files = [
     "UNET3D/utils/focal_loss.py",
     "UNET3D/plot.py",
     "UNET3D/utils/generalized_dice.py",
-    "UNET3D/visualize.py",
-    "UNET3D/class_distributions.py"
+    "UNET3D/visualize.py"
 ]
 
 # Specify files to be excluded
@@ -21,6 +20,7 @@ excluded_files = [
     "UNET3D/merger_unet.py",
     "UNET3D/unet_model/count_parameters.py",
     "UNET3D/unet_model/test_model.py",
+    "UNET3D/class_distributions.py"
 ]
 
 # Get all .py files in the directories

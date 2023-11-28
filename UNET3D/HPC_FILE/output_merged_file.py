@@ -505,7 +505,7 @@ def visualize_model_output(epoch, input, model, patient_id, device):
 
   input_images = np.squeeze(input_images, axis=0)
   fig, ax = plt.subplots(len(slices), 5, figsize=(15, 5))
-  seg = [nib.load(f'/work3/s194572/data/{patient_id}/{patient_id}_{titles}').get_fdata() for titles in ['seg.nii']]
+  seg = [nib.load(f'/work3/s211469/data/{patient_id}/{patient_id}_{titles}').get_fdata() for titles in ['seg.nii']]
 
   for i, slice in enumerate(slices):
     for j in range(len(plot_titles)):
@@ -575,37 +575,6 @@ def predictions_plot(image, mask_true, mask_pred, patient_id='BraTS2021_00495'):
 
 
 
-# Content from: UNET3D/class_distributions.py
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
-import nibabel as nib
-from pathlib import Path
-
-data_dir = Path('/work3/s211469/data')
-patient_ids = np.loadtxt(data_dir / 'filenames.txt', dtype=str)
-extension = 'seg.nii'
-distributions = []
-
-for patient_id in patient_ids:
-    data_path = data_dir / patient_id / f'{patient_id}_{extension}'
-    target = nib.load(data_path).get_fdata()
-    
-    start_idx = 56
-    end_idx = 184
-    start_idx_height = 13
-    end_idx_height = 141
-    target = target[start_idx:end_idx,start_idx:end_idx,start_idx_height:end_idx_height]
-
-    target = np.where(target==4, 3, target)
-
-    distribution = np.bincount(target.flatten().astype(int))
-    distributions.append(distribution)
-    print(f'Patient {patient_id} done')
-#Save distributions
-distributions = np.asarray(distributions)
-np.save('class_distributions.npy', distributions)
-
 # Content from: UNET3D/data_loader.py
 import torch
 from torch.utils.data import Dataset
@@ -615,7 +584,7 @@ from pathlib import Path
 import torch.nn.functional as F
 
 class BrainDataset(Dataset):
-    def __init__(self, patient_ids: list, data_dir: Path, binary='WT'): #(WT, TC, ET)
+    def __init__(self, patient_ids: list, data_dir: Path, binary='WT'): #(WT, TC, MT)
         self.patient_ids = patient_ids
         self.data_dir = data_dir
         self.binary = binary
@@ -757,7 +726,7 @@ def train_model(
     #setup wandb    
 
     # 1. Create dataset #Note this is for testing
-    data_dir = Path('/work3/s194572/data')
+    data_dir = Path('/work3/s211469/data')
     patient_ids = np.loadtxt(data_dir / 'filenames_filtered.txt', dtype=str)
     val_pct = 0.1
     val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
@@ -817,7 +786,7 @@ def train_model(
 
               #LOG WANDB
               if wandb_active:
-                wandb.log({"train/train_loss": loss.item()})
+                wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
         
         # 6. Evaluate the model on the validation set
         val_score_dice, val_score_jaccard, confusion = evaluate(model, val_loader, device, amp)
@@ -871,7 +840,7 @@ if USE_WANDB:
         }
     }
     #set dataloader
-    dataset_type = ['WT', 'TC', 'ET']
+    dataset_type = ['WT', 'TC', 'MT']
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{dataset_type[0]}")
 
 def run_model():

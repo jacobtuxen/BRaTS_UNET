@@ -105,7 +105,7 @@ def train_model(
 
               #LOG WANDB
               if wandb_active:
-                wandb.log({"train/train_loss": loss.item()})
+                wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
         
         # 6. Evaluate the model on the validation set
         val_score_dice, val_score_jaccard, confusion = evaluate(model, val_loader, device, amp)
@@ -159,7 +159,7 @@ if USE_WANDB:
         }
     }
     #set dataloader
-    dataset_type = ['WT', 'TC', 'ET']
+    dataset_type = ['WT', 'TC', 'MT']
     sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{dataset_type[0]}")
 
 def run_model():
