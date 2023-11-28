@@ -14,7 +14,7 @@ def evaluate(net, dataloader, device, amp):
     num_val_batches = len(dataloader)
     dice_score = 0
     jaccard_score = 0
-    confusion = torch.zeros(net.n_classes, net.n_classes)
+    confusion = torch.zeros(net.n_classes, net.n_classes).to(device=device)
 
     # iterate over the validation set
     with torch.autocast(device.type if device.type != 'mps' else 'cpu', enabled=amp):
