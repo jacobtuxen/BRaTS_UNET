@@ -318,7 +318,7 @@ from torch.nn.functional import one_hot
 from skimage.util import montage
 import matplotlib.pyplot as plt
 import sys
-#sys.path.append('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET')
+sys.path.append('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET')
 import torch.nn.functional as F
 from matplotlib.lines import Line2D
 
@@ -332,7 +332,7 @@ def predictions_plot(image, mask_true, mask_pred, patient_id='BraTS2021_00495'):
     assert len(mask_pred.shape) == 5
     assert len(image.shape) == 3
 
-    img_tensor = image.detach().numpy()
+    img_tensor = image.cpu().detach().numpy()
     mask_true_tensor = mask_true.squeeze()[1].squeeze().cpu().detach().numpy()
     mask_pred_tensor = mask_pred.squeeze()[1].squeeze().cpu().detach().numpy()
 
@@ -391,10 +391,14 @@ def predictions_plot(image, mask_true, mask_pred, patient_id='BraTS2021_00495'):
 # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # model = model.to(device=device)
 # print('loading model')
-# #Test loader    
+#Test loader    
 # patient_ids = ['BraTS2021_00495']
 # data_dir = Path(str('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET/data/archive'))
-# dataset = BrainDataset(patient_ids, data_dir, binary='TC')
+# dataset = BrainDataset(patient_ids, data_dir, binary='WT')
+# data, target,_ = dataset[0]
+# print(data.shape)
+# print(target.shape)
+# print(np.unique(target))
 # train_loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
 # print('loading data')
 # for batch in train_loader:
@@ -484,96 +488,6 @@ class GeneralizedDiceLoss(_AbstractDiceLoss):
         denominator = (denominator * w_l).clamp(min=self.epsilon)
 
         return 2 * (intersect.sum() / denominator.sum())
-
-# Content from: UNET3D/visualize.py
-import torch
-import numpy as np
-import matplotlib.pyplot as plt
-import nibabel as nib
-from skimage.util import montage
-
-def visualize_model_output(epoch, input, model, patient_id, device):
-  slices = np.linspace(10,100, 5)
-  plot_titles = ['flair', 't1ce', 't2','seg', 'output']
-
-  model.eval()
-  with torch.no_grad():
-    input = input.unsqueeze(0).to(device)
-    output = model(input).cpu().numpy()
-    output = np.argmax(output, axis=1) #<- #0 air
-    input_images = input.cpu().numpy()
-
-  input_images = np.squeeze(input_images, axis=0)
-  fig, ax = plt.subplots(len(slices), 5, figsize=(15, 5))
-  seg = [nib.load(f'/work3/s211469/data/{patient_id}/{patient_id}_{titles}').get_fdata() for titles in ['seg.nii']]
-
-  for i, slice in enumerate(slices):
-    for j in range(len(plot_titles)):
-      if j == 0:
-        ax[i, j].imshow(input_images[0, :, :, int(slice)], cmap='gray')
-        ax[i,j].set_xticks([])
-        ax[i,j].set_yticks([])
-      elif j == 1:
-        ax[i, j].imshow(input_images[1, :, :, int(slice)], cmap='gray')
-        ax[i,j].set_xticks([])
-        ax[i,j].set_yticks([])
-      elif j == 2:
-        ax[i, j].imshow(input_images[2, :, :, int(slice)], cmap='gray')
-        ax[i,j].set_xticks([])
-        ax[i,j].set_yticks([])
-      elif j == 3:
-        ax[i, j].imshow(seg[0][:, :, int(slice)], cmap='gray')
-        ax[i,j].set_xticks([])
-        ax[i,j].set_yticks([])
-      elif j == 4:
-        ax[i, j].imshow(output[0, :, :, int(slice)], cmap='gray')
-        ax[i,j].set_xticks([])
-        ax[i,j].set_yticks([])
-      if i==0:
-        ax[i, j].set_title(f'{plot_titles[j]}')
-      
-  model.train()
-  return fig
-
-def predictions_plot(image, mask_true, mask_pred, patient_id='BraTS2021_00495'):
-    #Args:
-    #mask_true: true binary mask is a tensor of size (1, 2, 128,128,128)
-    #mask_pred: predicted binary mask is a tensor of size (1, 2, 128,128,128)
-    #image: is a flair data tensor of size (128,128,128)
-    #patient_id: is a string of the patient id
-    assert len(mask_true.shape) == 5
-    assert len(mask_pred.shape) == 5
-    assert len(image.shape) == 3
-
-    img_tensor = image.detach().numpy()
-    mask_true_tensor = mask_true.squeeze()[1].squeeze().cpu().detach().numpy()
-    mask_pred_tensor = mask_pred.squeeze()[1].squeeze().cpu().detach().numpy()
-
-    #Pad zeros to size 160x160x160
-    img_tensor = np.pad(img_tensor, ((16,16),(16,16),(16,16)), 'constant', constant_values=0)
-    mask_true_tensor = np.pad(mask_true_tensor, ((16,16),(16,16),(16,16)), 'constant', constant_values=0)
-    mask_pred_tensor = np.pad(mask_pred_tensor, ((16,16),(16,16),(16,16)), 'constant', constant_values=0)
-    
-
-    image = np.rot90(montage(img_tensor))
-    mask_true = np.rot90(montage(mask_true_tensor))
-    mask_pred = np.rot90(montage(mask_pred_tensor))
-
-
-    intersection = np.logical_and(mask_true, mask_pred)
-    fig, ax = plt.subplots(1, 1, figsize = (8, 8))
-    plt.subplot(1,1,1)
-    ax.imshow(image, cmap ='bone')
-    ax.imshow(np.ma.masked_where(mask_true == False, mask_true),
-                cmap='cool', alpha=0.9)
-    ax.imshow(np.ma.masked_where(mask_pred == False, mask_pred),
-                cmap='spring', alpha=0.6)
-    ax.imshow(np.ma.masked_where(intersection == False, intersection),
-                cmap='winter', alpha=1)
-    plt.suptitle(f'Error plot patient: {patient_id}')
-    return fig
-
-
 
 # Content from: UNET3D/data_loader.py
 import torch
@@ -796,19 +710,19 @@ def train_model(
             wandb.log({"val/val_accuarce_jaccard:": val_score_jaccard})
             wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
             print(f"confusion: {confusion}, at epoch {epoch}")
-            if epoch % 2 == 0:
-                
-                mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
-                mask_pred = model(images.to(device=device, dtype=torch.float32))
-                mask_pred_train = np.argmax(mask_pred.detach().cpu().numpy(), axis=1)
-                mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
-                img_train = images[0][0]
-                patient_id = patient_ids[0]
-                fig = predictions_plot(img_train, mask_true_train, mask_pred_train, patient_id=patient_id)
-                wandb.log({"train/plot": fig})
-                fig.clf()
-                plt.close(fig)
-                
+                            
+            mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+            mask_pred_train = np.argmax(masks_pred.detach().cpu().numpy(), axis=1)
+            mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+            img_train = images[0][0]
+            patient_id = patient_ids[0]
+            fig = predictions_plot(img_train, mask_true_train, mask_pred_train, patient_id=patient_id)
+            wandb.log({"train/plot": fig})
+            fig.clf()
+            plt.close(fig)
+
+            if epoch % 5 == 0:                
+                model.eval()
                 image_val, true_masks_val, patient_ids_val = next(iter(val_loader))
                 mask_true_val = F.one_hot(true_masks_val[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
                 mask_pred_val = model(image_val.to(device=device, dtype=torch.float32))
@@ -820,6 +734,7 @@ def train_model(
                 wandb.log({"val/plot": fig_val})
                 fig_val.clf()
                 plt.close(fig_val)
+                model.train()
 #LOGIN
 if USE_WANDB:
     timestamp = datetime.now().strftime("%Y%d%m-%H%M%S")
@@ -841,7 +756,7 @@ if USE_WANDB:
     }
     #set dataloader
     dataset_type = ['WT', 'TC', 'MT']
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{dataset_type[0]}")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{dataset_type[0]}_")
 
 def run_model():
     model = UNet3D(n_channels=3, n_classes=2, trilinear=False, scale_channels=1)

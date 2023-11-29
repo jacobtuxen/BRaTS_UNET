@@ -6,7 +6,7 @@ from torch.nn.functional import one_hot
 from skimage.util import montage
 import matplotlib.pyplot as plt
 import sys
-#sys.path.append('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET')
+sys.path.append('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET')
 from UNET3D.data_loader import BrainDataset
 from unet_model.unet_model import UNet3D
 import torch.nn.functional as F
@@ -22,7 +22,7 @@ def predictions_plot(image, mask_true, mask_pred, patient_id='BraTS2021_00495'):
     assert len(mask_pred.shape) == 5
     assert len(image.shape) == 3
 
-    img_tensor = image.detach().numpy()
+    img_tensor = image.cpu().detach().numpy()
     mask_true_tensor = mask_true.squeeze()[1].squeeze().cpu().detach().numpy()
     mask_pred_tensor = mask_pred.squeeze()[1].squeeze().cpu().detach().numpy()
 
@@ -81,10 +81,14 @@ def predictions_plot(image, mask_true, mask_pred, patient_id='BraTS2021_00495'):
 # device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 # model = model.to(device=device)
 # print('loading model')
-# #Test loader    
+#Test loader    
 # patient_ids = ['BraTS2021_00495']
 # data_dir = Path(str('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET/data/archive'))
-# dataset = BrainDataset(patient_ids, data_dir, binary='TC')
+# dataset = BrainDataset(patient_ids, data_dir, binary='WT')
+# data, target,_ = dataset[0]
+# print(data.shape)
+# print(target.shape)
+# print(np.unique(target))
 # train_loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False)
 # print('loading data')
 # for batch in train_loader:

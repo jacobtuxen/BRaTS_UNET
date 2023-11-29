@@ -115,11 +115,10 @@ def train_model(
             wandb.log({"val/val_accuarce_jaccard:": val_score_jaccard})
             wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
             print(f"confusion: {confusion}, at epoch {epoch}")
-            if epoch % 2 == 0:
+            if epoch % 5 == 0:
                 
                 mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
-                mask_pred = model(images.to(device=device, dtype=torch.float32))
-                mask_pred_train = np.argmax(mask_pred.detach().cpu().numpy(), axis=1)
+                mask_pred_train = np.argmax(masks_pred.detach().cpu().numpy(), axis=1)
                 mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
                 img_train = images[0][0]
                 patient_id = patient_ids[0]
@@ -128,6 +127,7 @@ def train_model(
                 fig.clf()
                 plt.close(fig)
                 
+                model.eval()
                 image_val, true_masks_val, patient_ids_val = next(iter(val_loader))
                 mask_true_val = F.one_hot(true_masks_val[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
                 mask_pred_val = model(image_val.to(device=device, dtype=torch.float32))
@@ -139,6 +139,7 @@ def train_model(
                 wandb.log({"val/plot": fig_val})
                 fig_val.clf()
                 plt.close(fig_val)
+                model.train()
 #LOGIN
 if USE_WANDB:
     timestamp = datetime.now().strftime("%Y%d%m-%H%M%S")
