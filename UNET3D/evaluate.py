@@ -10,7 +10,7 @@ def evaluate(net, dataloader, device, amp):
     net.eval()
     jaccard = JaccardIndex(task="multiclass" ,num_classes=net.n_classes).to(device=device)
     dice = DiceMetric(num_classes=net.n_classes).to(device=device)
-    confusionmat = ConfusionMatrix(task = 'binary', num_classes=net.n_classes).to(device=device)
+    # confusion = ConfusionMatrix(num_classes=net.n_classes).to(device=device)
     num_val_batches = len(dataloader)
     dice_score = 0
     jaccard_score = 0
@@ -38,4 +38,4 @@ def evaluate(net, dataloader, device, amp):
             #confusion += confusionmat(mask_pred, mask_true)
 
     net.train()
-    return dice_score / max(num_val_batches, 1), jaccard_score / max(num_val_batches, 1), confusion
+    return dice_score / max(num_val_batches, 1), jaccard_score / max(num_val_batches, 1)

@@ -35,7 +35,6 @@ def train_model(
         learning_rate: float = 1e-5,
         amp: bool = False,
         weight_decay: float = 1e-8,
-        momentum: float = 0.999,
         gradient_clipping: float = 1.0,
         optimizer: str = "RMSprop",
         wandb_active = False,
@@ -45,12 +44,15 @@ def train_model(
     #setup wandb    
 
     # 1. Create dataset #Note this is for testing
-    data_dir = Path('/work3/s211469/data')
-    patient_ids = np.loadtxt(data_dir / 'filenames_filtered.txt', dtype=str)
-    val_pct = 0.1
-    val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
-    training_ids = [id for id in patient_ids if id not in val_ids]
-
+    study_no = 's194572'
+    data_dir = Path(f'/work3/{study_no}/data')
+    training_ids = np.loadtxt(data_dir / 'training_ids.txt', dtype=str)
+    val_ids = np.loadtxt(data_dir / 'val_ids.txt', dtype=str)
+    # val_pct = 0.1
+    # val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
+    # training_ids = [id for id in patient_ids if id not in val_ids]
+    #save val_ids and training_ids
+    
     # 1. Create dataset and validation set
     train_set = BrainDataset(patient_ids=training_ids, data_dir=data_dir, binary=dataset_type)
     val_set = BrainDataset(patient_ids=val_ids, data_dir=data_dir, binary=dataset_type)
@@ -60,7 +62,7 @@ def train_model(
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
     
-    optimizer = optim.Adam(model.parameters(),lr=1e-4)
+    optimizer = optim.Adam(model.parameters(),lr=learning_rate, weight_decay=weight_decay)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
@@ -102,21 +104,15 @@ def train_model(
               if device.type == 'cuda':
                 torch.cuda.empty_cache()
                 gc.collect()
-
-              #LOG WANDB
-              if wandb_active:
-                wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
         
         # 6. Evaluate the model on the validation set
-        val_score_dice, val_score_jaccard, confusion = evaluate(model, val_loader, device, amp)
+        val_score_dice, val_score_jaccard = evaluate(model, val_loader, device, amp)
         scheduler.step(val_score_dice)
         if wandb_active:
             wandb.log({"val/val_accuracy_dice": val_score_dice})
             wandb.log({"val/val_accuarce_jaccard:": val_score_jaccard})
             wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
-            print(f"confusion: {confusion}, at epoch {epoch}")
             if epoch % 5 == 0:
-                
                 mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
                 mask_pred_train = np.argmax(masks_pred.detach().cpu().numpy(), axis=1)
                 mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
@@ -150,10 +146,9 @@ if USE_WANDB:
         "metric": {"goal": "maximize", "name": "val/val_accuracy"},
         "parameters": {
             "batch_size": {"values": [4,6,8]},
-            "lr": {"max": 1e-4, "min": 1e-6},
+            "lr": {"max": 1e-3, "min": 1e-5},
             "epochs": {"values": [50]},
             "weight_decay": {"max": 1e-3, "min": 1e-6},
-            "momentum": {"values": [0.9, 0.99]},
             "amp": {"values": [True]},
             "gradient_clipping": {"values": [1.0]},
             "optimizer": {"values": ["Adam"]},
@@ -161,7 +156,7 @@ if USE_WANDB:
     }
     #set dataloader
     dataset_type = ['WT', 'TC', 'MT']
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{dataset_type[0]}_baseline_{timestamp}")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_{dataset_type[2]}_BASELINE_fxtv_{timestamp}")
 
 def run_model():
     model = UNet3D(n_channels=3, n_classes=2, trilinear=False, scale_channels=1)
@@ -176,18 +171,17 @@ def run_model():
                     learning_rate=wandb.config.lr,
                     amp=wandb.config.amp,
                     weight_decay=wandb.config.weight_decay, 
-                    momentum=wandb.config.momentum, 
                     gradient_clipping=wandb.config.gradient_clipping,
                     optimizer=wandb.config.optimizer,
                     wandb_active=True,
-                    dataset_type=dataset_type[0]
+                    dataset_type=dataset_type[2]
                     )
 
     else:
         train_model(model=model, device=device)
 
 if USE_WANDB:
-    wandb.agent(sweep_id, function=run_model, count=10)
+    wandb.agent(sweep_id, function=run_model, count=30)
 else:
     run_model()
 
