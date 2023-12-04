@@ -21,7 +21,8 @@ excluded_files = [
     "UNET3D/unet_model/count_parameters.py",
     "UNET3D/unet_model/test_model.py",
     "UNET3D/class_distributions.py",
-    "UNET3D/visualize.py"
+    "UNET3D/visualize.py",
+    "UNET3D/test_model.py",
 ]
 
 # Get all .py files in the directories

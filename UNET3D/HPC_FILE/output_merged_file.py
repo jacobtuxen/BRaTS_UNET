@@ -562,7 +562,7 @@ import torch.nn.functional as F
 @torch.inference_mode()
 def evaluate(net, dataloader, device, amp):
     net.eval()
-    jaccard = JaccardIndex(task="binary" ,num_classes=net.n_classes).to(device=device)
+    jaccard = JaccardIndex(task="multiclass" ,num_classes=net.n_classes).to(device=device)
     dice = DiceMetric(num_classes=net.n_classes).to(device=device)
     confusionmat = ConfusionMatrix(task = 'binary', num_classes=net.n_classes).to(device=device)
     num_val_batches = len(dataloader)
@@ -578,21 +578,18 @@ def evaluate(net, dataloader, device, amp):
             # move images and labels to correct device and type
             image = image.to(device=device, dtype=torch.float32)
             mask_true = mask_true.to(device=device, dtype=torch.long)
-            mask_true = F.one_hot(mask_true, net.n_classes).permute(0, 4, 1, 2, 3).long()
+            #mask_true = F.one_hot(mask_true, net.n_classes).permute(0, 4, 1, 2, 3).long()
 
             # predict the mask
             mask_pred = net(image)
             # mask_true = F.one_hot(mask_true, net.n_classes).permute(0, 4, 1, 2, 3).float()
-            mask_pred = F.one_hot(mask_pred.argmax(dim=1), net.n_classes).permute(0, 4, 1, 2, 3).long()
+            #mask_pred = F.one_hot(mask_pred.argmax(dim=1), net.n_classes).permute(0, 4, 1, 2, 3).long()
             # compute the Dice score, ignoring background
             mask_pred = mask_pred.to(device=device)
-            print(f'Mask true on device: {mask_true.device}')
-            print(f'Mask pred on device: {mask_pred.device}')
-
 
             jaccard_score += jaccard(mask_pred, mask_true)
             dice_score += dice(mask_pred, mask_true)
-            confusion += confusionmat(mask_pred, mask_true)
+            #confusion += confusionmat(mask_pred, mask_true)
 
     net.train()
     return dice_score / max(num_val_batches, 1), jaccard_score / max(num_val_batches, 1), confusion
@@ -710,18 +707,18 @@ def train_model(
             wandb.log({"val/val_accuarce_jaccard:": val_score_jaccard})
             wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
             print(f"confusion: {confusion}, at epoch {epoch}")
-                            
-            mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
-            mask_pred_train = np.argmax(masks_pred.detach().cpu().numpy(), axis=1)
-            mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
-            img_train = images[0][0]
-            patient_id = patient_ids[0]
-            fig = predictions_plot(img_train, mask_true_train, mask_pred_train, patient_id=patient_id)
-            wandb.log({"train/plot": fig})
-            fig.clf()
-            plt.close(fig)
-
-            if epoch % 5 == 0:                
+            if epoch % 5 == 0:
+                
+                mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+                mask_pred_train = np.argmax(masks_pred.detach().cpu().numpy(), axis=1)
+                mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
+                img_train = images[0][0]
+                patient_id = patient_ids[0]
+                fig = predictions_plot(img_train, mask_true_train, mask_pred_train, patient_id=patient_id)
+                wandb.log({"train/plot": fig})
+                fig.clf()
+                plt.close(fig)
+                
                 model.eval()
                 image_val, true_masks_val, patient_ids_val = next(iter(val_loader))
                 mask_true_val = F.one_hot(true_masks_val[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
@@ -744,8 +741,8 @@ if USE_WANDB:
         "name": "sweep",
         "metric": {"goal": "maximize", "name": "val/val_accuracy"},
         "parameters": {
-            "batch_size": {"values": [6,8]},
-            "lr": {"max": 1e-3, "min": 1e-6},
+            "batch_size": {"values": [4,6,8]},
+            "lr": {"max": 1e-4, "min": 1e-6},
             "epochs": {"values": [50]},
             "weight_decay": {"max": 1e-3, "min": 1e-6},
             "momentum": {"values": [0.9, 0.99]},
@@ -756,7 +753,7 @@ if USE_WANDB:
     }
     #set dataloader
     dataset_type = ['WT', 'TC', 'MT']
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{dataset_type[0]}_")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{dataset_type[0]}_baseline_{timestamp}")
 
 def run_model():
     model = UNet3D(n_channels=3, n_classes=2, trilinear=False, scale_channels=1)

@@ -149,8 +149,8 @@ if USE_WANDB:
         "name": "sweep",
         "metric": {"goal": "maximize", "name": "val/val_accuracy"},
         "parameters": {
-            "batch_size": {"values": [6,8]},
-            "lr": {"max": 1e-3, "min": 1e-6},
+            "batch_size": {"values": [4,6,8]},
+            "lr": {"max": 1e-4, "min": 1e-6},
             "epochs": {"values": [50]},
             "weight_decay": {"max": 1e-3, "min": 1e-6},
             "momentum": {"values": [0.9, 0.99]},
@@ -161,7 +161,7 @@ if USE_WANDB:
     }
     #set dataloader
     dataset_type = ['WT', 'TC', 'MT']
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{dataset_type[0]}")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{dataset_type[0]}_baseline_{timestamp}")
 
 def run_model():
     model = UNet3D(n_channels=3, n_classes=2, trilinear=False, scale_channels=1)
