@@ -44,8 +44,12 @@ def train_model(
     #setup wandb    
 
     # 1. Create dataset #Note this is for testing
-    study_no = 's194572'
+    study_no = 's211469'
     data_dir = Path(f'/work3/{study_no}/data')
+    # Make directory for saving model
+    model_dir = Path(f'/work3/{study_no}/models')
+    model_dir.mkdir(parents=True, exist_ok=True)
+
     training_ids = np.loadtxt(data_dir / 'training_ids.txt', dtype=str)
     val_ids = np.loadtxt(data_dir / 'val_ids.txt', dtype=str)
     # val_pct = 0.1
@@ -136,6 +140,12 @@ def train_model(
                 fig_val.clf()
                 plt.close(fig_val)
                 model.train()
+    # 7. Save the model
+    model_path = model_dir / f'model_{dataset_type}_baseline.pt'
+    torch.save(model.state_dict(), model_path)
+    print(f'Model saved to {model_path}')
+
+
 #LOGIN
 if USE_WANDB:
     timestamp = datetime.now().strftime("%Y%d%m-%H%M%S")
@@ -145,10 +155,10 @@ if USE_WANDB:
         "name": "sweep",
         "metric": {"goal": "maximize", "name": "val/val_accuracy"},
         "parameters": {
-            "batch_size": {"values": [4,6,8]},
+            "batch_size": {"values": [2,4,6,8]},
             "lr": {"max": 1e-3, "min": 1e-5},
-            "epochs": {"values": [50]},
-            "weight_decay": {"max": 1e-3, "min": 1e-6},
+            "epochs": {"values": [30]},
+            "weight_decay": {"max": 1e-4, "min": 1e-6},
             "amp": {"values": [True]},
             "gradient_clipping": {"values": [1.0]},
             "optimizer": {"values": ["Adam"]},
@@ -156,9 +166,9 @@ if USE_WANDB:
     }
     #set dataloader
     dataset_type = ['WT', 'TC', 'MT']
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_{dataset_type[2]}_BASELINE_fxtv_{timestamp}")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_{dataset_type[0]}_BASELINE_{timestamp}_")
 
-def run_model():
+def run_model(dataset_type = 'WT'):
     model = UNet3D(n_channels=3, n_classes=2, trilinear=False, scale_channels=1)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device=device)
@@ -174,15 +184,17 @@ def run_model():
                     gradient_clipping=wandb.config.gradient_clipping,
                     optimizer=wandb.config.optimizer,
                     wandb_active=True,
-                    dataset_type=dataset_type[2]
+                    dataset_type=dataset_type[0]
                     )
 
     else:
-        train_model(model=model, device=device)
+        train_model(model=model, device=device, epochs=50, batch_size=6, learning_rate=1e-4, amp=True, weight_decay=0, gradient_clipping=1.0, optimizer="Adam", wandb_active=False, dataset_type=dataset_type)
 
 if USE_WANDB:
     wandb.agent(sweep_id, function=run_model, count=30)
 else:
-    run_model()
+    dataset_type = ['WT', 'TC', 'MT']
+    for data_type in dataset_type:
+        run_model(data_type)
 
 print("Training done!")

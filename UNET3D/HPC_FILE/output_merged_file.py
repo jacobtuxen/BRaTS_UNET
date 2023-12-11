@@ -318,7 +318,7 @@ from torch.nn.functional import one_hot
 from skimage.util import montage
 import matplotlib.pyplot as plt
 import sys
-sys.path.append('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET')
+#sys.path.append('/Users/christianvalentinkjaer/Documents/DTU/E23/02456_Deep_Learning/Brain_Project/BRaTS_UNET')
 import torch.nn.functional as F
 from matplotlib.lines import Line2D
 
@@ -535,7 +535,8 @@ class BrainDataset(Dataset):
         target = target[start_idx:end_idx,start_idx:end_idx,start_idx_height:end_idx_height]
 
         #normalize data in each channel min max normalization
-        data = data - data.min() / (1e-5 + (data.max() - data.min())) 
+        for i in range(data.shape[0]):
+            data[i] = (data[i] - data[i].min()) / (data[i].max() - data[i].min())
 
         return data, target, patient_id
 
@@ -564,7 +565,7 @@ def evaluate(net, dataloader, device, amp):
     net.eval()
     jaccard = JaccardIndex(task="multiclass" ,num_classes=net.n_classes).to(device=device)
     dice = DiceMetric(num_classes=net.n_classes).to(device=device)
-    confusionmat = ConfusionMatrix(task = 'binary', num_classes=net.n_classes).to(device=device)
+    # confusion = ConfusionMatrix(num_classes=net.n_classes).to(device=device)
     num_val_batches = len(dataloader)
     dice_score = 0
     jaccard_score = 0
@@ -592,7 +593,7 @@ def evaluate(net, dataloader, device, amp):
             #confusion += confusionmat(mask_pred, mask_true)
 
     net.train()
-    return dice_score / max(num_val_batches, 1), jaccard_score / max(num_val_batches, 1), confusion
+    return dice_score / max(num_val_batches, 1), jaccard_score / max(num_val_batches, 1)
 
 # Content from: UNET3D/trainUNet.py
 
@@ -617,7 +618,7 @@ import wandb
 import gc
 
 WANDB_API_KEY="fa06c10dd6495a8b9afda9eb0e328ab57f243479"
-USE_WANDB = True
+USE_WANDB = False
 
 def train_model(
         model,
@@ -627,7 +628,6 @@ def train_model(
         learning_rate: float = 1e-5,
         amp: bool = False,
         weight_decay: float = 1e-8,
-        momentum: float = 0.999,
         gradient_clipping: float = 1.0,
         optimizer: str = "RMSprop",
         wandb_active = False,
@@ -637,12 +637,19 @@ def train_model(
     #setup wandb    
 
     # 1. Create dataset #Note this is for testing
-    data_dir = Path('/work3/s211469/data')
-    patient_ids = np.loadtxt(data_dir / 'filenames_filtered.txt', dtype=str)
-    val_pct = 0.1
-    val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
-    training_ids = [id for id in patient_ids if id not in val_ids]
+    study_no = 's211469'
+    data_dir = Path(f'/work3/{study_no}/data')
+    # Make directory for saving model
+    model_dir = Path(f'/work3/{study_no}/models')
+    model_dir.mkdir(parents=True, exist_ok=True)
 
+    training_ids = np.loadtxt(data_dir / 'training_ids.txt', dtype=str)
+    val_ids = np.loadtxt(data_dir / 'val_ids.txt', dtype=str)
+    # val_pct = 0.1
+    # val_ids = np.random.choice(patient_ids, size=round(len(patient_ids)*val_pct), replace=False)
+    # training_ids = [id for id in patient_ids if id not in val_ids]
+    #save val_ids and training_ids
+    
     # 1. Create dataset and validation set
     train_set = BrainDataset(patient_ids=training_ids, data_dir=data_dir, binary=dataset_type)
     val_set = BrainDataset(patient_ids=val_ids, data_dir=data_dir, binary=dataset_type)
@@ -652,7 +659,7 @@ def train_model(
     train_loader = DataLoader(train_set, shuffle=True, **loader_args)
     val_loader = DataLoader(val_set, shuffle=False, drop_last=True, **loader_args)
     
-    optimizer = optim.Adam(model.parameters(),lr=1e-4)
+    optimizer = optim.Adam(model.parameters(),lr=learning_rate, weight_decay=weight_decay)
 
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
     grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
@@ -694,21 +701,15 @@ def train_model(
               if device.type == 'cuda':
                 torch.cuda.empty_cache()
                 gc.collect()
-
-              #LOG WANDB
-              if wandb_active:
-                wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
         
         # 6. Evaluate the model on the validation set
-        val_score_dice, val_score_jaccard, confusion = evaluate(model, val_loader, device, amp)
+        val_score_dice, val_score_jaccard = evaluate(model, val_loader, device, amp)
         scheduler.step(val_score_dice)
         if wandb_active:
             wandb.log({"val/val_accuracy_dice": val_score_dice})
             wandb.log({"val/val_accuarce_jaccard:": val_score_jaccard})
             wandb.log({"train/epoch_loss": epoch_loss/len(train_loader)})
-            print(f"confusion: {confusion}, at epoch {epoch}")
             if epoch % 5 == 0:
-                
                 mask_true_train = F.one_hot(true_masks[0].unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
                 mask_pred_train = np.argmax(masks_pred.detach().cpu().numpy(), axis=1)
                 mask_pred_train = F.one_hot(torch.from_numpy(mask_pred_train[0]).unsqueeze(0), model.n_classes).permute(0, 4, 1, 2, 3).float()
@@ -732,6 +733,12 @@ def train_model(
                 fig_val.clf()
                 plt.close(fig_val)
                 model.train()
+    # 7. Save the model
+    model_path = model_dir / f'model_{dataset_type}_baseline.pt'
+    torch.save(model.state_dict(), model_path)
+    print(f'Model saved to {model_path}')
+    
+
 #LOGIN
 if USE_WANDB:
     timestamp = datetime.now().strftime("%Y%d%m-%H%M%S")
@@ -742,10 +749,9 @@ if USE_WANDB:
         "metric": {"goal": "maximize", "name": "val/val_accuracy"},
         "parameters": {
             "batch_size": {"values": [4,6,8]},
-            "lr": {"max": 1e-4, "min": 1e-6},
+            "lr": {"max": 1e-3, "min": 1e-5},
             "epochs": {"values": [50]},
             "weight_decay": {"max": 1e-3, "min": 1e-6},
-            "momentum": {"values": [0.9, 0.99]},
             "amp": {"values": [True]},
             "gradient_clipping": {"values": [1.0]},
             "optimizer": {"values": ["Adam"]},
@@ -753,9 +759,9 @@ if USE_WANDB:
     }
     #set dataloader
     dataset_type = ['WT', 'TC', 'MT']
-    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_GDFL_{dataset_type[0]}_baseline_{timestamp}")
+    sweep_id = wandb.sweep(sweep=sweep_configuration, project=f"UNET3D_{dataset_type[0]}_BASELINE_{timestamp}_")
 
-def run_model():
+def run_model(dataset_type = 'WT'):
     model = UNet3D(n_channels=3, n_classes=2, trilinear=False, scale_channels=1)
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = model.to(device=device)
@@ -768,7 +774,6 @@ def run_model():
                     learning_rate=wandb.config.lr,
                     amp=wandb.config.amp,
                     weight_decay=wandb.config.weight_decay, 
-                    momentum=wandb.config.momentum, 
                     gradient_clipping=wandb.config.gradient_clipping,
                     optimizer=wandb.config.optimizer,
                     wandb_active=True,
@@ -776,12 +781,14 @@ def run_model():
                     )
 
     else:
-        train_model(model=model, device=device)
+        train_model(model=model, device=device, epochs=50, batch_size=6, learning_rate=1e-4, amp=True, weight_decay=0, gradient_clipping=1.0, optimizer="Adam", wandb_active=False, dataset_type=dataset_type)
 
 if USE_WANDB:
-    wandb.agent(sweep_id, function=run_model, count=10)
+    wandb.agent(sweep_id, function=run_model, count=30)
 else:
-    run_model()
+    dataset_type = ['WT', 'TC', 'MT']
+    for data_type in dataset_type:
+        run_model(data_type)
 
 print("Training done!")
 
